@@ -1,6 +1,7 @@
 [package]
-name = "yet-another-slay-clone"
+name = "yasc"
 version = "0.1.0"
 authors = ["Evgeny Barbashov <evgeny.barbashov@gmail.com>"]
+license = "MIT"
 
 [dependencies]
