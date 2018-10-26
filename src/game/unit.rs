@@ -5,7 +5,7 @@ pub enum UnitType {
     Grave, Tree, Village, Tower, GreatKnight, Knight, Soldier, Militia,
 }
 
-#[derive(Eq, PartialEq, Hash, Debug)]
+#[derive(Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub struct UnitDescription {
     pub name: UnitType,
     pub is_purchasable: bool,
@@ -17,7 +17,7 @@ pub struct UnitDescription {
     pub upgrades_to: Option<&'static UnitDescription>
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub struct Unit {
     id: u32,
     description: &'static UnitDescription,
