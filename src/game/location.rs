@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 use hex2d::Coordinate;
 
+use super::ids::ID;
 use super::unit::Unit;
 
 
@@ -13,17 +14,17 @@ pub enum TileSurface {
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub struct Tile {
-    id: u32,
+    id: ID,
     surface: TileSurface,
     unit: Option<Unit>,
 }
 
 impl Tile {
-    pub fn new(id: u32, surface: TileSurface) -> Tile {
-        Tile { id, surface, unit: None }
+    pub fn new(id: ID, surface: TileSurface) -> Self {
+        Self { id, surface, unit: None }
     }
 
-    pub fn id(&self) -> u32 {
+    pub fn id(&self) -> ID {
         self.id
     }
 
@@ -83,25 +84,33 @@ impl Tile {
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub struct Player {
-    id: u32,
+    id: ID,
 }
 
 impl Player {
-    pub fn id(&self) -> u32 {
+    pub fn new(id: ID) -> Self {
+        Self {id,}
+    }
+
+    pub fn id(&self) -> ID {
         self.id
     }
 }
 
 #[derive(Debug)]
 pub struct Region {
-    id: u32,
+    id: ID,
     owner: Player,
     money: i32,
     coordinates: HashSet<Coordinate<i32>>,
 }
 
 impl Region {
-    pub fn id(&self) -> u32 {
+    pub fn new(id: ID, owner: Player, coordinates: HashSet<Coordinate<i32>>) -> Self {
+        Self {id, owner, coordinates, money: 0,}
+    }
+
+    pub fn id(&self) -> ID {
         self.id
     }
 
@@ -126,7 +135,7 @@ pub struct Location {
 }
 
 impl Location {
-    pub fn new(map: HashMap<Coordinate<i32>, Tile>, regions_vec: Vec<Region>) -> Location {
+    pub fn new(map: HashMap<Coordinate<i32>, Tile>, regions_vec: Vec<Region>) -> Self {
         let mut coordinate_to_region = HashMap::default();
         let mut regions = HashMap::default();
         for region in regions_vec.into_iter() {
@@ -137,7 +146,7 @@ impl Location {
             }
         }
 
-        Location { map, regions, coordinate_to_region, }
+        Self { map, regions, coordinate_to_region, }
     }
 
     pub fn map(&self) -> &HashMap<Coordinate<i32>, Tile> {

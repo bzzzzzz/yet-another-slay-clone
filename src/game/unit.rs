@@ -1,4 +1,4 @@
-
+use super::ids::ID;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub enum UnitType {
@@ -19,21 +19,21 @@ pub struct UnitDescription {
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub struct Unit {
-    id: u32,
+    id: ID,
     description: &'static UnitDescription,
     moves_left: u32,
 }
 
 
 impl Unit {
-    pub fn new(id: u32, unit_type: UnitType) -> Unit {
+    pub fn new(id: ID, unit_type: UnitType) -> Self {
         let description = description(unit_type);
         // Unit can move only on the next turn after its creation
         let moves_left = 0;
-        Unit { description, moves_left, id, }
+        Self { description, moves_left, id, }
     }
 
-    pub fn id(&self) -> u32 {
+    pub fn id(&self) -> ID {
         self.id
     }
 
