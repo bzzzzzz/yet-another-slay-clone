@@ -1,8 +1,16 @@
+use super::consts::*;
 use super::ids::ID;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub enum UnitType {
-    Grave, Tree, Village, Tower, GreatKnight, Knight, Soldier, Militia,
+    Grave,
+    Tree,
+    Village,
+    Tower,
+    GreatKnight,
+    Knight,
+    Soldier,
+    Militia,
 }
 
 #[derive(Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
@@ -14,7 +22,7 @@ pub struct UnitDescription {
     pub max_moves: u32,
     pub defence: u8,
     pub attack: u8,
-    pub upgrades_to: Option<&'static UnitDescription>
+    pub upgrades_to: Option<&'static UnitDescription>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
@@ -24,13 +32,16 @@ pub struct Unit {
     moves_left: u32,
 }
 
-
 impl Unit {
     pub fn new(id: ID, unit_type: UnitType) -> Self {
         let description = description(unit_type);
         // Unit can move only on the next turn after its creation
         let moves_left = 0;
-        Self { description, moves_left, id, }
+        Self {
+            description,
+            moves_left,
+            id,
+        }
     }
 
     pub fn id(&self) -> ID {
@@ -97,7 +108,6 @@ impl Unit {
         self.moves_left = self.description.max_moves;
     }
 
-
     /// Return true if this unit can defeat unit provided as argument
     ///
     /// # Examples:
@@ -117,95 +127,6 @@ impl Unit {
         self.description.attack > other.description.defence
     }
 }
-
-
-pub const GRAVE: UnitDescription = UnitDescription {
-    name: UnitType::Grave,
-    is_purchasable: false,
-    purchase_cost: 0,
-    turn_cost: 0,
-    max_moves: 0,
-    defence: 0,
-    attack: 0,
-    upgrades_to: None,
-};
-
-pub const TREE: UnitDescription = UnitDescription {
-    name: UnitType::Tree,
-    is_purchasable: false,
-    purchase_cost: 0,
-    turn_cost: 1,
-    max_moves: 0,
-    defence: 0,
-    attack: 0,
-    upgrades_to: None,
-};
-
-pub const VILLAGE: UnitDescription = UnitDescription {
-    name: UnitType::Village,
-    is_purchasable: false,
-    purchase_cost: 0,
-    turn_cost: 0,
-    max_moves: 0,
-    defence: 1,
-    attack: 0,
-    upgrades_to: None,
-};
-
-pub const TOWER: UnitDescription = UnitDescription {
-    name: UnitType::Tower,
-    is_purchasable: true,
-    purchase_cost: 10,
-    turn_cost: 0,
-    max_moves: 0,
-    defence: 2,
-    attack: 0,
-    upgrades_to: None,
-};
-
-pub const GREAT_KNIGHT: UnitDescription = UnitDescription {
-    name: UnitType::GreatKnight,
-    is_purchasable: true,
-    purchase_cost: 80,
-    turn_cost: 4,
-    max_moves: 5,
-    defence: 4,
-    attack: 4,
-    upgrades_to: None,
-};
-
-pub const KNIGHT: UnitDescription = UnitDescription {
-    name: UnitType::Knight,
-    is_purchasable: true,
-    purchase_cost: 40,
-    turn_cost: 3,
-    max_moves: 5,
-    defence: 3,
-    attack: 3,
-    upgrades_to: Some(&GREAT_KNIGHT),
-};
-
-pub const SOLDIER: UnitDescription = UnitDescription {
-    name: UnitType::Soldier,
-    is_purchasable: true,
-    purchase_cost: 20,
-    turn_cost: 2,
-    max_moves: 5,
-    defence: 2,
-    attack: 2,
-    upgrades_to: Some(&KNIGHT),
-};
-
-pub const MILITIA: UnitDescription = UnitDescription {
-    name: UnitType::Militia,
-    is_purchasable: true,
-    purchase_cost: 10,
-    turn_cost: 1,
-    max_moves: 5,
-    defence: 1,
-    attack: 1,
-    upgrades_to: Some(&SOLDIER),
-};
 
 /// Return a description of unit identified by enum entry
 ///
@@ -233,7 +154,7 @@ pub fn description(unit_type: UnitType) -> &'static UnitDescription {
 
 #[cfg(test)]
 mod test {
-    use super::{Unit, UnitType, description};
+    use super::{description, Unit, UnitType};
 
     #[test]
     fn unit_has_no_moves_when_created() {

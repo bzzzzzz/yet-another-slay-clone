@@ -1,4 +1,4 @@
-use std::collections::{HashMap,HashSet,VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::iter::FromIterator;
 use std::rc::Rc;
 
@@ -6,7 +6,6 @@ use hex2d::Coordinate;
 
 use super::ids::ID;
 use super::unit::Unit;
-
 
 pub type Coord = Coordinate<i32>;
 
@@ -58,7 +57,11 @@ pub struct Tile {
 
 impl Tile {
     pub fn new(id: ID, surface: TileSurface) -> Self {
-        Self { id, surface, unit: None }
+        Self {
+            id,
+            surface,
+            unit: None,
+        }
     }
 
     pub fn id(&self) -> ID {
@@ -94,7 +97,6 @@ impl Tile {
         self.unit.take()
     }
 
-
     /// Place unit on this tile
     ///
     /// # Examples
@@ -126,7 +128,7 @@ pub struct Player {
 
 impl Player {
     pub fn new(id: ID) -> Self {
-        Self {id,}
+        Self { id }
     }
 
     pub fn id(&self) -> ID {
@@ -148,7 +150,11 @@ impl Region {
         if coordinates.is_empty() {
             panic!("Coordinates should never be empty");
         }
-        Self {id, owner, coordinates, }
+        Self {
+            id,
+            owner,
+            coordinates,
+        }
     }
 
     pub fn id(&self) -> ID {
@@ -181,7 +187,10 @@ impl Location {
     /// Create new location represented by specified map and regions.
     /// Return error if resulting location is not valid. See validness description in `validate`
     /// method docs
-    pub fn new(map: HashMap<Coord, Tile>, regions_vec: Vec<Region>) -> Result<Self, LocationInitiationError> {
+    pub fn new(
+        map: HashMap<Coord, Tile>,
+        regions_vec: Vec<Region>,
+    ) -> Result<Self, LocationInitiationError> {
         let mut coordinate_to_region = HashMap::default();
         let mut regions = HashMap::default();
         for region in regions_vec.into_iter() {
@@ -192,7 +201,11 @@ impl Location {
             }
         }
 
-        let location = Self { map, regions, coordinate_to_region, };
+        let location = Self {
+            map,
+            regions,
+            coordinate_to_region,
+        };
         match Self::validate(&location) {
             None => Ok(location),
             Some(e) => Err(e),
@@ -222,10 +235,9 @@ impl Location {
         // Check if there are regions with unconnected land
         for (id, region) in location.regions.iter() {
             if let Some(c) = region.coordinates.iter().next() {
-                let result = location.bfs(c, |c| {region.coordinates.contains(c)});
+                let result = location.bfs(c, |c| region.coordinates.contains(c));
                 let result: HashSet<Coord> = HashSet::from_iter(result.into_iter());
-                let wrong = region.coordinates.iter()
-                    .find(|c| {!result.contains(c)});
+                let wrong = region.coordinates.iter().find(|c| !result.contains(c));
                 if wrong.is_some() {
                     return Some(LocationInitiationError::SplitRegions(region.id));
                 }
@@ -258,7 +270,8 @@ impl Location {
     /// This method will return empty vec if starting coordinate is out of location or does
     /// not match the predicate.
     pub fn bfs<P>(&self, coordinate: &Coord, predicate: P) -> Vec<Coord>
-        where P: Fn(&Coord) -> bool
+    where
+        P: Fn(&Coord) -> bool,
     {
         let mut processed = HashSet::new();
         let mut result = Vec::new();
@@ -271,10 +284,11 @@ impl Location {
             result.push(coordinate.clone());
             processed.insert(coordinate.clone());
             for neighbor in coordinate.neighbors().iter() {
-                if processed.contains(neighbor) ||
-                    queue.contains(neighbor) ||
-                    self.tile_at(neighbor).is_none() ||
-                    !predicate(neighbor) {
+                if processed.contains(neighbor)
+                    || queue.contains(neighbor)
+                    || self.tile_at(neighbor).is_none()
+                    || !predicate(neighbor)
+                {
                     continue;
                 }
                 queue.push_back(neighbor.clone());
@@ -285,13 +299,12 @@ impl Location {
     }
 }
 
-
 #[cfg(test)]
 mod test {
-    use std::collections::{HashMap,HashSet};
+    use std::collections::{HashMap, HashSet};
 
-    use super::{Coord,Location,LocationInitiationError,Player,Region,Tile,TileSurface};
     use super::TileSurface::*;
+    use super::{Coord, Location, LocationInitiationError, Player, Region, Tile, TileSurface};
 
     /// This test method creates a small hex map like this one:
     ///  * *
@@ -337,7 +350,7 @@ mod test {
         coords_two.insert(Coord::new(-1, 0));
         coords_two.insert(Coord::new(0, -1));
         let region_two = Region::new(12, Player::new(22), coords_two);
-        let location = Location::new(map, vec!(region_one, region_two));
+        let location = Location::new(map, vec![region_one, region_two]);
         assert!(location.is_ok());
     }
 
@@ -356,9 +369,12 @@ mod test {
         coords_two.insert(Coord::new(-1, 0));
         coords_two.insert(Coord::new(0, -1));
         let region_two = Region::new(12, Player::new(22), coords_two);
-        let location = Location::new(map, vec!(region_one, region_two));
+        let location = Location::new(map, vec![region_one, region_two]);
         assert!(location.is_err());
-        assert_eq!(location.unwrap_err(), LocationInitiationError::IntersectingRegions(Coord::new(-1, 1)))
+        assert_eq!(
+            location.unwrap_err(),
+            LocationInitiationError::IntersectingRegions(Coord::new(-1, 1))
+        )
     }
 
     #[test]
@@ -374,16 +390,19 @@ mod test {
         coords_two.insert(Coord::new(-1, 1));
         coords_two.insert(Coord::new(0, -1));
         let region_two = Region::new(12, Player::new(22), coords_two);
-        let location = Location::new(map, vec!(region_one, region_two));
+        let location = Location::new(map, vec![region_one, region_two]);
         assert!(location.is_err());
-        assert_eq!(location.unwrap_err(), LocationInitiationError::SplitRegions(12))
+        assert_eq!(
+            location.unwrap_err(),
+            LocationInitiationError::SplitRegions(12)
+        )
     }
 
     #[test]
     fn bfs_returns_everything() {
         let map = test_map([Water, Land, Water, Land, Water, Land, Water]);
         let location = Location::new(map, Vec::new()).unwrap();
-        let coords = location.bfs(&Coord::new(0, 1), |c| {true});
+        let coords = location.bfs(&Coord::new(0, 1), |c| true);
         assert_eq!(coords.len(), location.map().len());
         for (c, _) in location.map().iter() {
             assert!(coords.contains(c));
@@ -394,9 +413,13 @@ mod test {
     fn bfs_returns_filtered() {
         let map = test_map([Water, Land, Water, Land, Water, Land, Water]);
         let location = Location::new(map, Vec::new()).unwrap();
-        let coords = location.bfs(&Coord::new(0, 1), |c| {location.tile_at(c).map_or(false, |t| {t.surface().is_water()})});
+        let coords = location.bfs(&Coord::new(0, 1), |c| {
+            location
+                .tile_at(c)
+                .map_or(false, |t| t.surface().is_water())
+        });
         assert_eq!(coords.len(), 2);
-        for c in vec!(Coord::new(0, 1), Coord::new(-1, 1)).iter() {
+        for c in vec![Coord::new(0, 1), Coord::new(-1, 1)].iter() {
             assert!(coords.contains(c));
         }
     }
@@ -405,7 +428,7 @@ mod test {
     fn bfs_returns_nothing_coord_out_of_location() {
         let map = test_map([Water, Land, Water, Land, Water, Land, Water]);
         let location = Location::new(map, Vec::new()).unwrap();
-        let coords = location.bfs(&Coord::new(2, 1), |c| {true});
+        let coords = location.bfs(&Coord::new(2, 1), |c| true);
         assert!(coords.is_empty());
     }
 
@@ -413,7 +436,9 @@ mod test {
     fn bfs_returns_nothing_start_coord_fails_predicate() {
         let map = test_map([Water, Land, Water, Land, Water, Land, Water]);
         let location = Location::new(map, Vec::new()).unwrap();
-        let coords = location.bfs(&Coord::new(0, 1), |c| {location.tile_at(c).map_or(false, |t| {t.surface().is_land()})});
+        let coords = location.bfs(&Coord::new(0, 1), |c| {
+            location.tile_at(c).map_or(false, |t| t.surface().is_land())
+        });
         assert!(coords.is_empty());
     }
 }
