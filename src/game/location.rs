@@ -235,8 +235,8 @@ impl Location {
         // Check if there are regions with unconnected land
         for (id, region) in location.regions.iter() {
             if let Some(c) = region.coordinates.iter().next() {
-                let result = location.bfs(c, |c| region.coordinates.contains(c));
-                let result: HashSet<Coord> = HashSet::from_iter(result.into_iter());
+                let result = location.bfs_iter(c, |c| region.coordinates.contains(c));
+                let result: HashSet<Coord> = HashSet::from_iter(result);
                 let wrong = region.coordinates.iter().find(|c| !result.contains(c));
                 if wrong.is_some() {
                     return Some(LocationInitiationError::SplitRegions(region.id));
@@ -269,33 +269,80 @@ impl Location {
     ///
     /// This method will return empty vec if starting coordinate is out of location or does
     /// not match the predicate.
-    pub fn bfs<P>(&self, coordinate: &Coord, predicate: P) -> Vec<Coord>
+    pub fn bfs_all<P>(&self, coordinate: &Coord, predicate: P) -> Vec<Coord>
     where
         P: Fn(&Coord) -> bool,
     {
-        let mut processed = HashSet::new();
-        let mut result = Vec::new();
+        self.bfs_iter(coordinate, predicate).collect()
+    }
+
+    /// Return an iterator that performs a BFS on the location, starting from provided coordinate.
+    ///
+    /// This method will return empty iterator if starting coordinate is out of location or does
+    /// not match the predicate.
+    pub fn bfs_iter<P>(&self, coordinate: &Coord, predicate: P) -> BfsIter<P>
+    where
+        P: Fn(&Coord) -> bool,
+    {
+        BfsIter::new(&self, coordinate.clone(), predicate)
+    }
+}
+
+pub struct BfsIter<'a, P> {
+    processed: HashSet<Coord>,
+    queue: VecDeque<(u32, Coord)>,
+    predicate: P,
+    location: &'a Location,
+}
+
+impl<'a, P> BfsIter<'a, P>
+where
+    P: Fn(&Coord) -> bool,
+{
+    fn new(location: &'a Location, start_coordinate: Coord, predicate: P) -> BfsIter<P> {
+        let mut processed = HashSet::default();
         let mut queue = VecDeque::new();
 
-        if predicate(coordinate) && self.tile_at(coordinate).is_some() {
-            queue.push_back(coordinate.clone());
+        if predicate(&start_coordinate) && location.tile_at(&start_coordinate).is_some() {
+            queue.push_back((0, start_coordinate));
+            processed.insert(start_coordinate);
         }
-        while let Some(coordinate) = queue.pop_front() {
-            result.push(coordinate.clone());
-            processed.insert(coordinate.clone());
-            for neighbor in coordinate.neighbors().iter() {
-                if processed.contains(neighbor)
-                    || queue.contains(neighbor)
-                    || self.tile_at(neighbor).is_none()
-                    || !predicate(neighbor)
-                {
-                    continue;
-                }
-                queue.push_back(neighbor.clone());
-            }
+        Self {
+            processed,
+            queue,
+            location,
+            predicate,
         }
+    }
 
-        result
+    fn process_and_return(&mut self, step: u32, coordinate: Coord) -> Coord {
+        for neighbor in coordinate.neighbors().iter() {
+            if !self.processed.contains(neighbor)
+                && self.location.tile_at(neighbor).is_some()
+                && (self.predicate)(neighbor)
+            {
+                self.queue.push_back((step + 1, neighbor.clone()));
+            }
+            self.processed.insert(neighbor.clone());
+        }
+        coordinate
+    }
+}
+
+impl<'a, P> Iterator for BfsIter<'a, P>
+where
+    P: Fn(&Coord) -> bool,
+{
+    type Item = Coord;
+
+    fn next(&mut self) -> Option<Coord> {
+        self.queue
+            .pop_front()
+            .map(|(step, coordinate)| self.process_and_return(step, coordinate))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.location.map.len()))
     }
 }
 
@@ -402,7 +449,7 @@ mod test {
     fn bfs_returns_everything() {
         let map = test_map([Water, Land, Water, Land, Water, Land, Water]);
         let location = Location::new(map, Vec::new()).unwrap();
-        let coords = location.bfs(&Coord::new(0, 1), |c| true);
+        let coords = location.bfs_all(&Coord::new(0, 1), |c| true);
         assert_eq!(coords.len(), location.map().len());
         for (c, _) in location.map().iter() {
             assert!(coords.contains(c));
@@ -413,7 +460,7 @@ mod test {
     fn bfs_returns_filtered() {
         let map = test_map([Water, Land, Water, Land, Water, Land, Water]);
         let location = Location::new(map, Vec::new()).unwrap();
-        let coords = location.bfs(&Coord::new(0, 1), |c| {
+        let coords = location.bfs_all(&Coord::new(0, 1), |c| {
             location
                 .tile_at(c)
                 .map_or(false, |t| t.surface().is_water())
@@ -428,7 +475,7 @@ mod test {
     fn bfs_returns_nothing_coord_out_of_location() {
         let map = test_map([Water, Land, Water, Land, Water, Land, Water]);
         let location = Location::new(map, Vec::new()).unwrap();
-        let coords = location.bfs(&Coord::new(2, 1), |c| true);
+        let coords = location.bfs_all(&Coord::new(2, 1), |c| true);
         assert!(coords.is_empty());
     }
 
@@ -436,7 +483,7 @@ mod test {
     fn bfs_returns_nothing_start_coord_fails_predicate() {
         let map = test_map([Water, Land, Water, Land, Water, Land, Water]);
         let location = Location::new(map, Vec::new()).unwrap();
-        let coords = location.bfs(&Coord::new(0, 1), |c| {
+        let coords = location.bfs_all(&Coord::new(0, 1), |c| {
             location.tile_at(c).map_or(false, |t| t.surface().is_land())
         });
         assert!(coords.is_empty());

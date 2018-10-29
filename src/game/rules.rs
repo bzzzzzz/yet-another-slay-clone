@@ -59,10 +59,10 @@ pub fn validate_location(location: &Location) -> Option<LocationRulesValidationE
     }
 
     // Check if there are pieces of land that do not have ground connection
-    let land = location.bfs(&first_land.unwrap(), |c| {
+    let land = location.bfs_iter(&first_land.unwrap(), |c| {
         location.tile_at(c).map_or(false, |t| t.surface().is_land())
     });
-    let land: HashSet<Coord> = HashSet::from_iter(land.into_iter());
+    let land: HashSet<Coord> = HashSet::from_iter(land);
 
     for (coordinate, tile) in location.map().iter() {
         if tile.surface().is_land() && !land.contains(coordinate) {
