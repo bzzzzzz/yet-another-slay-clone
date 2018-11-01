@@ -1,10 +1,10 @@
 //! This module contains util functions and classes that help enforcing game rules
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashSet};
 use std::iter::FromIterator;
 
 use super::consts::MIN_LOCATION_LAND_COVERAGE_PCT;
 use super::ids::ID;
-use super::location::{Coord, Location, LocationInitiationError, TileSurface};
+use super::location::{Coord, Location, LocationValidationError};
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub enum LocationRulesValidationError {
@@ -12,9 +12,15 @@ pub enum LocationRulesValidationError {
     InsufficientLand(u8),
     UnconnectedLand,
     NotCoveredWithRegions(Coord),
-    InitiationError(LocationInitiationError),
+    InitiationError(LocationValidationError),
     MisplacedUnit(Coord),
     RegionContainsWater(ID),
+}
+
+impl From<LocationValidationError> for LocationRulesValidationError {
+    fn from(e: LocationValidationError) -> Self {
+        LocationRulesValidationError::InitiationError(e)
+    }
 }
 
 /// This method checks that location is generally valid and constructed according to game rules:
@@ -25,21 +31,19 @@ pub enum LocationRulesValidationError {
 /// - All regions should cover only land, not water;
 /// - All units should be places on land, not on water;
 ///
-pub fn validate_location(location: &Location) -> Option<LocationRulesValidationError> {
+pub fn validate_location(location: &Location) -> Result<(), LocationRulesValidationError> {
     // Start with checking general location consistency
-    if let Some(e) = Location::validate(location) {
-        return Some(LocationRulesValidationError::InitiationError(e));
-    }
+    Location::validate(location)?;
 
     // Check if there are coordinates that are land and not part of any region
     // Also check if there are coordinates that are water and part of region.
     for (coordinate, tile) in location.map().iter() {
         if tile.surface().is_land() && location.region_at(coordinate).is_none() {
-            return Some(LocationRulesValidationError::NotCoveredWithRegions(
+            return Err(LocationRulesValidationError::NotCoveredWithRegions(
                 coordinate.clone(),
             ));
         } else if tile.surface().is_water() && location.region_at(coordinate).is_some() {
-            return Some(LocationRulesValidationError::RegionContainsWater(
+            return Err(LocationRulesValidationError::RegionContainsWater(
                 location.region_at(coordinate).unwrap().id(),
             ));
         }
@@ -55,7 +59,7 @@ pub fn validate_location(location: &Location) -> Option<LocationRulesValidationE
     }
 
     if first_land.is_none() {
-        return Some(LocationRulesValidationError::NoLand);
+        return Err(LocationRulesValidationError::NoLand);
     }
 
     // Check if there are pieces of land that do not have ground connection
@@ -66,7 +70,7 @@ pub fn validate_location(location: &Location) -> Option<LocationRulesValidationE
 
     for (coordinate, tile) in location.map().iter() {
         if tile.surface().is_land() && !land.contains(coordinate) {
-            return Some(LocationRulesValidationError::UnconnectedLand);
+            return Err(LocationRulesValidationError::UnconnectedLand);
         }
     }
 
@@ -74,7 +78,7 @@ pub fn validate_location(location: &Location) -> Option<LocationRulesValidationE
     // We can rely on land containing all land cells
     let real_coverage = (land.len() * 100 / location.map().len()) as u8;
     if MIN_LOCATION_LAND_COVERAGE_PCT > real_coverage {
-        return Some(LocationRulesValidationError::InsufficientLand(
+        return Err(LocationRulesValidationError::InsufficientLand(
             real_coverage,
         ));
     }
@@ -83,14 +87,12 @@ pub fn validate_location(location: &Location) -> Option<LocationRulesValidationE
     // (Currently you can place unit only on land)
     for (coordinate, tile) in location.map().iter() {
         if tile.unit().is_some() && tile.surface().is_water() {
-            return Some(LocationRulesValidationError::MisplacedUnit(
-                coordinate.clone(),
-            ));
+            return Err(LocationRulesValidationError::MisplacedUnit(*coordinate));
         }
     }
 
     // Return none because no errors were found
-    None
+    Ok(())
 }
 
 pub enum RegionsValidationError {
@@ -111,7 +113,7 @@ mod test {
 
     use game::location::TileSurface::*;
     use game::location::{
-        Coord, Location, LocationInitiationError, Player, Region, Tile, TileSurface,
+        Coord, Location, Player, Region, Tile, TileSurface,
     };
     use game::unit::{Unit, UnitType};
 
@@ -161,7 +163,7 @@ mod test {
         let location = Location::new(map, vec![region_one, region_two]).unwrap();
         let res = validate_location(&location);
 
-        assert_eq!(res, None);
+        assert_eq!(res, Ok(()));
     }
 
     #[test]
@@ -170,7 +172,7 @@ mod test {
         let location = Location::new(map, Vec::new()).unwrap();
         let res = validate_location(&location);
 
-        assert_eq!(res, Some(LocationRulesValidationError::NoLand));
+        assert_eq!(res, Err(LocationRulesValidationError::NoLand));
     }
 
     #[test]
@@ -195,7 +197,7 @@ mod test {
         let location = Location::new(map, vec![region_one, region_two]).unwrap();
         let res = validate_location(&location);
 
-        assert_eq!(res, Some(LocationRulesValidationError::UnconnectedLand));
+        assert_eq!(res, Err(LocationRulesValidationError::UnconnectedLand));
     }
 
     #[test]
@@ -222,7 +224,7 @@ mod test {
 
         assert_eq!(
             res,
-            Some(LocationRulesValidationError::NotCoveredWithRegions(
+            Err(LocationRulesValidationError::NotCoveredWithRegions(
                 Coord::new(0, 0)
             ))
         );
@@ -252,7 +254,7 @@ mod test {
 
         assert_eq!(
             res,
-            Some(LocationRulesValidationError::MisplacedUnit(Coord::new(
+            Err(LocationRulesValidationError::MisplacedUnit(Coord::new(
                 0, 1
             )))
         );
@@ -281,7 +283,7 @@ mod test {
 
         assert_eq!(
             res,
-            Some(LocationRulesValidationError::InsufficientLand(42))
+            Err(LocationRulesValidationError::InsufficientLand(42))
         );
     }
 
@@ -310,7 +312,7 @@ mod test {
 
         assert_eq!(
             res,
-            Some(LocationRulesValidationError::RegionContainsWater(11))
+            Err(LocationRulesValidationError::RegionContainsWater(11))
         );
     }
 }

@@ -1,10 +1,9 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::iter::FromIterator;
-use std::rc::Rc;
 
 use hex2d::Coordinate;
 
-use super::ids::ID;
+use super::ids::{ID, NO_ID, IdProducer};
 use super::unit::Unit;
 
 pub type Coord = Coordinate<i32>;
@@ -173,14 +172,31 @@ impl Region {
 #[derive(Debug)]
 pub struct Location {
     map: HashMap<Coord, Tile>,
-    regions: HashMap<u32, Rc<Region>>,
-    coordinate_to_region: HashMap<Coord, Rc<Region>>,
+    regions: HashMap<ID, Region>,
+    coordinate_to_region: HashMap<Coord, ID>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
-pub enum LocationInitiationError {
+pub enum LocationValidationError {
+    DuplicateRegionId(ID),
     SplitRegions(ID),
     IntersectingRegions(Coord),
+    SameOwnerBorderingRegions(ID, ID),
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
+pub enum LocationModificationError {
+    CoordinateOutOfLocation(Coord),
+    NoUnitAtCoordinate(Coord),
+    CoordinateNotAdjacentToRegion(Coord),
+    NoSuchRegion(ID),
+    InvalidResult(LocationValidationError),
+}
+
+impl From<LocationValidationError> for LocationModificationError {
+    fn from(e: LocationValidationError) -> Self {
+        LocationModificationError::InvalidResult(e)
+    }
 }
 
 impl Location {
@@ -190,15 +206,18 @@ impl Location {
     pub fn new(
         map: HashMap<Coord, Tile>,
         regions_vec: Vec<Region>,
-    ) -> Result<Self, LocationInitiationError> {
+    ) -> Result<Self, LocationValidationError> {
         let mut coordinate_to_region = HashMap::default();
         let mut regions = HashMap::default();
         for region in regions_vec.into_iter() {
-            let region = Rc::new(region);
-            regions.insert(region.id, Rc::clone(&region));
-            for &coordinate in region.coordinates.iter() {
-                coordinate_to_region.insert(coordinate, Rc::clone(&region));
+            if regions.contains_key(&region.id) {
+                return Err(LocationValidationError::DuplicateRegionId(region.id));
             }
+
+            for &coordinate in region.coordinates.iter() {
+                coordinate_to_region.insert(coordinate, region.id);
+            }
+            regions.insert(region.id, region);
         }
 
         let location = Self {
@@ -206,62 +225,256 @@ impl Location {
             regions,
             coordinate_to_region,
         };
-        match Self::validate(&location) {
-            None => Ok(location),
-            Some(e) => Err(e),
-        }
+        Self::validate(&location)?;
+
+        Ok(location)
     }
 
     /// Validate if location provided does not contain any errors. This method only ensures there
     /// are no general error, but does not check if location is ok by game rules.
-    /// Returns `None` is everything is ok and `Some(LocationInitiationError)` if there were error
+    /// Returns nothing is everything is ok and `LocationInitiationError` if there were error
     /// found:
     ///
     /// - SplitRegions means that there is at least one region that contains of separate parts.
     ///   This parts does not have any common borders. Id of region with problem is provided
     /// - IntersectingRegions means that there are two regions that share the same coordinate
-    pub fn validate(location: &Self) -> Option<LocationInitiationError> {
-        // Check if there are intersecting regions
+    pub fn validate(location: &Self) -> Result<(), LocationValidationError> {
+        // Check if there are intersecting regions or empty regions
         let mut already_processed: HashSet<Coord> = HashSet::default();
         for (_, region) in location.regions.iter() {
             for &coordinate in region.coordinates.iter() {
                 if already_processed.contains(&coordinate) {
-                    return Some(LocationInitiationError::IntersectingRegions(coordinate));
+                    return Err(LocationValidationError::IntersectingRegions(coordinate));
                 }
                 already_processed.insert(coordinate);
             }
         }
 
         // Check if there are regions with unconnected land
-        for (id, region) in location.regions.iter() {
+        for (_, region) in location.regions.iter() {
             if let Some(c) = region.coordinates.iter().next() {
                 let result = location.bfs_iter(c, |c| region.coordinates.contains(c));
                 let result: HashSet<Coord> = HashSet::from_iter(result);
                 let wrong = region.coordinates.iter().find(|c| !result.contains(c));
                 if wrong.is_some() {
-                    return Some(LocationInitiationError::SplitRegions(region.id));
+                    return Err(LocationValidationError::SplitRegions(region.id));
                 }
             }
         }
 
-        // Return none because no errors were found
-        None
+        // Check if there are no regions of the same owner sharing the border
+        let (&start, _) = location.map.iter().next().unwrap();
+        for coord in location.bfs_iter(&start, |_| true) {
+            let region = location.region_at(&coord);
+            if region.is_none() {
+                continue;
+            }
+            let region = region.unwrap();
+
+            let neighbours = coord.neighbors();
+            for neighbour in neighbours.iter() {
+                let n_region = location.region_at(&neighbour);
+                if n_region.is_none() {
+                    continue;
+                }
+                let n_region = n_region.unwrap();
+
+                if region.id != n_region.id && region.owner.id == n_region.owner.id {
+                    // Just to make order predictable
+                    let (i1, i2) = if region.id > n_region.id { (n_region.id, region.id) } else { (region.id, n_region.id)  };
+                    return Err(LocationValidationError::SameOwnerBorderingRegions(i1, i2));
+                }
+            }
+        }
+
+        // Return ok because no errors were found
+        Ok(())
     }
 
     pub fn map(&self) -> &HashMap<Coord, Tile> {
         &self.map
     }
 
-    pub fn regions(&self) -> &HashMap<u32, Rc<Region>> {
+    pub fn regions(&self) -> &HashMap<u32, Region> {
         &self.regions
     }
 
-    pub fn region_at(&self, coordinate: &Coord) -> Option<&Rc<Region>> {
+    pub fn region_at(&self, coordinate: &Coord) -> Option<&Region> {
         self.coordinate_to_region.get(&coordinate)
+            .and_then(|id| self.regions.get(id))
     }
 
     pub fn tile_at(&self, coordinate: &Coord) -> Option<&Tile> {
         self.map.get(&coordinate)
+    }
+
+    /// Places a provided unit on a tile with specified coordinate. If that tile already has
+    /// unit on it, it will be replaced
+    ///
+    /// Will return `LocationModificationError::CoordinateOutOfLocation` if coordinate is out of
+    /// location borders
+    ///
+    /// If this method returns any kind of error, no changes to locations were made
+    pub fn place_unit(&mut self, unit: Unit, dst: Coord) -> Result<(), LocationModificationError> {
+        self.map.get_mut(&dst)
+            .ok_or_else(|| LocationModificationError::CoordinateOutOfLocation(dst))?
+            .place_unit(unit);
+        Ok(())
+    }
+
+    /// Move a unit from one tile to another. If another tile already has unit on it, it will be replaced
+    ///
+    /// Will return `LocationModificationError::CoordinateOutOfLocation` if one of coordinates is
+    /// out of location borders.
+    /// Will return `LocationModificationError::NoUnitAtCoordinate` is there is no unit to move
+    ///
+    /// If this method returns any kind of error, no changes to locations were made
+    pub fn move_unit(&mut self, from: Coord, to: Coord) -> Result<(), LocationModificationError> {
+        // Check if destination exists before performing changes
+        if !self.map.contains_key(&to) {
+            return Err(LocationModificationError::CoordinateOutOfLocation(to));
+        }
+
+        let unit = self.map.get_mut(&from)
+            .ok_or_else(|| LocationModificationError::CoordinateOutOfLocation(from))?
+            .take_unit()
+            .ok_or_else(|| LocationModificationError::NoUnitAtCoordinate(from))?;
+
+        self.place_unit(unit, to)
+    }
+
+    /// Add a tile with specified coordinate to a region with specified ID. This method expects
+    /// coordinate to be adjacent to a region, otherwise it will return error containing
+    /// `LocationModificationError::CoordinateNotAdjacentToRegion`.
+    /// If adding a tile to a region makes this region to border with other regions of the same
+    /// owner, those regions become one, with the ID provided to this method.
+    /// If coordinate was a part of other region, it is removed from an old region. If removing tile
+    /// from old region makes it separated, it is split into several regions.
+    ///
+    /// This method can return error with `LocationModificationError::NoSuchRegion` if there is no
+    /// region with provided ID, or `LocationModificationError::CoordinateOutOfLocation` if
+    /// coordinate is not inside the location bounds.
+    ///
+    /// If this method returns any kind of error, no changes to locations were made
+    pub fn add_tile_to_region(&mut self, coordinate: Coord, region_id: ID, id_producer: &mut IdProducer) -> Result<(), LocationModificationError> {
+        let (old_region_id, merge_ids) = self.validate_and_prepare_add_tile(coordinate, region_id)?;
+
+        // Then we need to remove coordinate from old region
+        // If region was split into parts by this action, we need to create new regions for those
+        // parts
+        if old_region_id != NO_ID {
+            self.remove_coordinate_from_region(old_region_id, coordinate);
+            self.maybe_remove_region(old_region_id);
+            self.maybe_split_region(old_region_id, id_producer);
+        }
+        // Then we can insert coordinate into new region
+        self.add_coordinate_to_region(region_id, coordinate);
+
+        // Finally, we need to check if region can be merged with another region of the same player
+        // If regions have common border - they should be merged
+        self.merge_regions(merge_ids, region_id);
+
+        Location::validate(self)
+            .expect("Adding region never should make location invalid");
+
+        Ok(())
+    }
+
+    fn validate_and_prepare_add_tile(&self, coordinate: Coord, region_id: ID) -> Result<(ID, Vec<ID>), LocationModificationError> {
+        // First we check if everything is ok with coordinates
+        if !self.map.contains_key(&coordinate) {
+            return Err(LocationModificationError::CoordinateOutOfLocation(coordinate));
+        }
+
+        let neighbours = coordinate.neighbors();
+        let region = self.regions.get(&region_id)
+            .ok_or_else(|| LocationModificationError::NoSuchRegion(region_id))?;
+
+        if region.coordinates.contains(&coordinate) {
+            return Err(LocationModificationError::CoordinateNotAdjacentToRegion(coordinate));
+        }
+
+        let region_neighbour = neighbours.iter()
+            .find(|c| region.coordinates.contains(c));
+        if region_neighbour.is_none() {
+            return Err(LocationModificationError::CoordinateNotAdjacentToRegion(coordinate));
+        }
+        let old_region_id = *self.coordinate_to_region.get(&coordinate).unwrap_or(&NO_ID);
+
+        let merge_ids: Vec<ID> = neighbours.iter()
+            .filter_map(|c| self.region_at(c))
+            .filter(|r| region_id != r.id)
+            .filter(|r| region.owner.id == r.owner.id)
+            .map(|r| r.id)
+            .collect();
+
+        Ok((old_region_id, merge_ids))
+    }
+
+    /// Merge region with `src_ids` into region with `dst_id`.
+    /// This will panic if IDs are bad.
+    fn merge_regions(&mut self, src_ids: Vec<ID>, dst_id: ID) {
+        if src_ids.is_empty() {
+            return;
+        }
+
+        for src_id in src_ids.iter() {
+            let region = self.regions.remove(&src_id).unwrap();
+            for coordinate in region.coordinates.into_iter() {
+                self.add_coordinate_to_region(dst_id, coordinate);
+            }
+        }
+    }
+
+    fn add_coordinate_to_region(&mut self, region_id: ID, coordinate: Coord) {
+        self.regions.get_mut(&region_id)
+            .expect("Region ID should be verified before providing them")
+            .coordinates.insert(coordinate);
+        self.coordinate_to_region.insert(coordinate, region_id);
+    }
+
+    fn remove_coordinate_from_region(&mut self, region_id: ID, coordinate: Coord) {
+        self.regions.get_mut(&region_id)
+            .expect("Region ID should be verified before providing them")
+            .coordinates.remove(&coordinate);
+        self.coordinate_to_region.remove(&coordinate);
+    }
+
+    /// Remove region with provided ID if region is empty
+    fn maybe_remove_region(&mut self, region_id: ID) {
+        if self.regions.get(&region_id).unwrap().coordinates.is_empty() {
+            self.regions.remove(&region_id);
+        }
+    }
+
+    /// Split region into part regions if it has became unconnected
+    fn maybe_split_region(&mut self, region_id: ID, id_producer: &mut IdProducer) {
+        if !self.regions.contains_key(&region_id) {
+            return;
+        }
+        let owner_id = self.regions.get(&region_id).unwrap().owner.id;
+        while let Some(coordinates) = self.region_part_to_remove(region_id) {
+            let new_id = id_producer.next();
+            for coordinate in coordinates.iter() {
+                self.remove_coordinate_from_region(region_id, *coordinate);
+                self.coordinate_to_region.insert(*coordinate, new_id);
+            }
+            Region::new(new_id, Player::new(owner_id), coordinates);
+        }
+    }
+
+    /// Return a set with coordinates of regions that can be removed from region because they are
+    /// not connected to other region. If there are no such parts, return None
+    fn region_part_to_remove(&self, region_id: ID) -> Option<HashSet<Coord>> {
+        let region = self.regions.get(&region_id).unwrap();
+        let start = *region.coordinates.iter().next().unwrap();
+        let coords = self.bfs_set(&start, |c| self.coordinate_to_region.get(c).unwrap().eq(&region_id));
+
+        if coords.eq(&region.coordinates) {
+            None
+        } else {
+            Some(coords)
+        }
     }
 
     /// Perform a BFS on the location, starting from provided coordinate. Return a vector
@@ -272,6 +485,18 @@ impl Location {
     pub fn bfs_all<P>(&self, coordinate: &Coord, predicate: P) -> Vec<Coord>
     where
         P: Fn(&Coord) -> bool,
+    {
+        self.bfs_iter(coordinate, predicate).collect()
+    }
+
+    /// Perform a BFS on the location, starting from provided coordinate. Return a set
+    /// containing all coordinates that matched a predicate.
+    ///
+    /// This method will return empty set if starting coordinate is out of location or does
+    /// not match the predicate.
+    pub fn bfs_set<P>(&self, coordinate: &Coord, predicate: P) -> HashSet<Coord>
+        where
+            P: Fn(&Coord) -> bool,
     {
         self.bfs_iter(coordinate, predicate).collect()
     }
@@ -350,8 +575,9 @@ where
 mod test {
     use std::collections::{HashMap, HashSet};
 
+    use game::unit::{Unit,UnitType};
     use super::TileSurface::*;
-    use super::{Coord, Location, LocationInitiationError, Player, Region, Tile, TileSurface};
+    use super::{Coord, Location, LocationValidationError, Player, Region, Tile, TileSurface};
 
     /// This test method creates a small hex map like this one:
     ///  * *
@@ -402,6 +628,25 @@ mod test {
     }
 
     #[test]
+    fn error_init_has_duplicate_id_regions() {
+        let map = test_map([Water, Land, Water, Land, Water, Land, Water]);
+
+        let mut coords_one = HashSet::default();
+        coords_one.insert(Coord::new(0, 1));
+        let region_one = Region::new(11, Player::new(21), coords_one);
+
+        let mut coords_two = HashSet::default();
+        coords_two.insert(Coord::new(-1, 0));
+        let region_two = Region::new(11, Player::new(22), coords_two);
+        let location = Location::new(map, vec![region_one, region_two]);
+        assert!(location.is_err());
+        assert_eq!(
+            location.unwrap_err(),
+            LocationValidationError::DuplicateRegionId(11)
+        )
+    }
+
+    #[test]
     fn error_init_has_intersecting_regions() {
         let map = test_map([Water, Land, Water, Land, Water, Land, Water]);
 
@@ -420,7 +665,7 @@ mod test {
         assert!(location.is_err());
         assert_eq!(
             location.unwrap_err(),
-            LocationInitiationError::IntersectingRegions(Coord::new(-1, 1))
+            LocationValidationError::IntersectingRegions(Coord::new(-1, 1))
         )
     }
 
@@ -441,8 +686,86 @@ mod test {
         assert!(location.is_err());
         assert_eq!(
             location.unwrap_err(),
-            LocationInitiationError::SplitRegions(12)
+            LocationValidationError::SplitRegions(12)
         )
+    }
+
+    #[test]
+    fn error_init_has_bordering_regions_of_same_owner() {
+        let map = test_map([Water, Water, Land, Land, Land, Water, Land]);
+
+        let player_id = 21;
+        let mut coords_one = HashSet::default();
+        coords_one.insert(Coord::new(-1, 1));
+        coords_one.insert(Coord::new(0, 0));
+        let region_one = Region::new(11, Player::new(player_id), coords_one);
+
+        let mut coords_two = HashSet::default();
+        coords_two.insert(Coord::new(1, -1));
+        coords_two.insert(Coord::new(0, -1));
+        let region_two = Region::new(12, Player::new(player_id), coords_two);
+        let location = Location::new(map, vec![region_one, region_two]);
+        assert!(location.is_err());
+        assert_eq!(
+            location.unwrap_err(),
+            LocationValidationError::SameOwnerBorderingRegions(11, 12)
+        )
+    }
+
+    fn create_valid_location() -> Location {
+        let map = test_map([Water, Land, Land, Land, Land, Land, Water]);
+
+        let mut coords_one = HashSet::default();
+        coords_one.insert(Coord::new(0, 1));
+        coords_one.insert(Coord::new(1, 0));
+        let region_one = Region::new(11, Player::new(21), coords_one);
+
+        let mut coords_two = HashSet::default();
+        coords_two.insert(Coord::new(-1, 1));
+        let region_two = Region::new(12, Player::new(22), coords_two);
+
+        let mut coords_three = HashSet::default();
+        coords_three.insert(Coord::new(0, 0));
+        coords_three.insert(Coord::new(1, -1));
+        let region_three = Region::new(13, Player::new(23), coords_three);
+
+        let mut coords_four = HashSet::default();
+        coords_four.insert(Coord::new(-1, 0));
+        coords_four.insert(Coord::new(0, -1));
+        let region_two = Region::new(14, Player::new(21), coords_four);
+        let location = Location::new(map, vec![region_one, region_two]);
+        assert!(location.is_ok());
+
+        location.unwrap()
+    }
+
+    #[test]
+    fn location_place_unit_correct() {
+        let mut location = create_valid_location();
+        let c = Coord::new(-1, 1);
+
+        assert_eq!(location.tile_at(&c).unwrap().unit(), &None);
+        let unit = Unit::new(22, UnitType::Grave);
+        location.place_unit(unit.clone(), c).unwrap();
+
+        assert!(location.tile_at(&c).unwrap().unit().eq(&Some(unit)));
+    }
+
+    #[test]
+    fn location_move_unit_correct() {
+        let mut location = create_valid_location();
+        let src = Coord::new(-1, 1);
+        let dst = Coord::new(1, -1);
+        let unit = Unit::new(22, UnitType::Grave);
+        location.place_unit(unit.clone(), src).unwrap();
+
+        assert!(location.tile_at(&src).unwrap().unit().eq(&Some(unit)));
+        assert_eq!(location.tile_at(&dst).unwrap().unit(), &None);
+
+        location.move_unit(src, dst).unwrap();
+
+        assert_eq!(location.tile_at(&src).unwrap().unit(), &None);
+        assert!(location.tile_at(&dst).unwrap().unit().eq(&Some(unit)));
     }
 
     #[test]

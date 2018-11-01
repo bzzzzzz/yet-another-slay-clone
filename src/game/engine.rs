@@ -18,11 +18,15 @@ pub enum EngineValidationError {
     LocationError(LocationRulesValidationError),
 }
 
+impl From<LocationRulesValidationError> for EngineValidationError {
+    fn from(e: LocationRulesValidationError) -> Self {
+        EngineValidationError::LocationError(e)
+    }
+}
+
 impl GameEngine {
     pub fn new(location: Location, players: Vec<Player>) -> Result<Self, EngineValidationError> {
-        if let Some(e) = validate_location(&location) {
-            return Err(EngineValidationError::LocationError(e));
-        }
+        validate_location(&location)?;
 
         let mut region_money = HashMap::default();
         for (id, region) in location.regions().iter() {
