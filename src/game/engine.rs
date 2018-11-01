@@ -43,7 +43,7 @@ impl GameEngine {
             region_money,
             current_turn: 1,
             active_player_num: 0,
-            id_producer: IdProducer::new(),
+            id_producer: IdProducer::default(),
         })
     }
 
@@ -64,6 +64,6 @@ impl GameEngine {
     }
 
     pub fn active_player(&self) -> &Player {
-        self.players.get(self.active_player_num).unwrap()
+        &self.players[self.active_player_num]
     }
 }

@@ -1,5 +1,5 @@
 //! This module contains util functions and classes that help enforcing game rules
-use std::collections::{HashSet};
+use std::collections::HashSet;
 use std::iter::FromIterator;
 
 use super::consts::MIN_LOCATION_LAND_COVERAGE_PCT;
@@ -38,13 +38,13 @@ pub fn validate_location(location: &Location) -> Result<(), LocationRulesValidat
     // Check if there are coordinates that are land and not part of any region
     // Also check if there are coordinates that are water and part of region.
     for (coordinate, tile) in location.map().iter() {
-        if tile.surface().is_land() && location.region_at(coordinate).is_none() {
+        if tile.surface().is_land() && location.region_at(*coordinate).is_none() {
             return Err(LocationRulesValidationError::NotCoveredWithRegions(
-                coordinate.clone(),
+                *coordinate,
             ));
-        } else if tile.surface().is_water() && location.region_at(coordinate).is_some() {
+        } else if tile.surface().is_water() && location.region_at(*coordinate).is_some() {
             return Err(LocationRulesValidationError::RegionContainsWater(
-                location.region_at(coordinate).unwrap().id(),
+                location.region_at(*coordinate).unwrap().id(),
             ));
         }
     }
@@ -63,7 +63,7 @@ pub fn validate_location(location: &Location) -> Result<(), LocationRulesValidat
     }
 
     // Check if there are pieces of land that do not have ground connection
-    let land = location.bfs_iter(&first_land.unwrap(), |c| {
+    let land = location.bfs_iter(first_land.unwrap(), |c| {
         location.tile_at(c).map_or(false, |t| t.surface().is_land())
     });
     let land: HashSet<Coord> = HashSet::from_iter(land);
@@ -102,7 +102,7 @@ pub enum RegionsValidationError {
 /// Validate that each active player has at least one active region
 pub fn validate_regions(
     location: &Location,
-    active_players_ids: Vec<ID>,
+    active_players_ids: &[ID],
 ) -> Option<RegionsValidationError> {
     unimplemented!()
 }
@@ -112,9 +112,7 @@ mod test {
     use std::collections::{HashMap, HashSet};
 
     use game::location::TileSurface::*;
-    use game::location::{
-        Coord, Location, Player, Region, Tile, TileSurface,
-    };
+    use game::location::{Coord, Location, Player, Region, Tile, TileSurface};
     use game::unit::{Unit, UnitType};
 
     use super::{validate_location, LocationRulesValidationError};
@@ -281,10 +279,7 @@ mod test {
         let location = Location::new(map, vec![region_one, region_two]).unwrap();
         let res = validate_location(&location);
 
-        assert_eq!(
-            res,
-            Err(LocationRulesValidationError::InsufficientLand(42))
-        );
+        assert_eq!(res, Err(LocationRulesValidationError::InsufficientLand(42)));
     }
 
     #[test]

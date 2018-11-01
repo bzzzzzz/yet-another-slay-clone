@@ -3,17 +3,12 @@ pub type ID = u32;
 pub const NO_ID: ID = 0;
 
 /// Class that always returns unique id
+#[derive(Default)]
 pub struct IdProducer {
     last_issued_id: ID,
 }
 
 impl IdProducer {
-    pub fn new() -> Self {
-        Self {
-            last_issued_id: NO_ID,
-        }
-    }
-
     pub fn next(&mut self) -> ID {
         self.last_issued_id += 1;
         self.last_issued_id
@@ -29,7 +24,7 @@ mod test {
     #[test]
     fn check_producer_has_no_duplicates() {
         let mut used_values: HashSet<ID> = HashSet::default();
-        let mut producer = IdProducer::new();
+        let mut producer = IdProducer::default();
 
         let size: usize = 100000;
         for _ in 1..size {
