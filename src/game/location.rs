@@ -397,7 +397,7 @@ impl Location {
         &self,
         coordinate: Coord,
         region_id: ID,
-    ) -> Result<(ID, Vec<ID>), LocationModificationError> {
+    ) -> Result<(ID, HashSet<ID>), LocationModificationError> {
         // First we check if everything is ok with coordinates
         if !self.map.contains_key(&coordinate) {
             return Err(LocationModificationError::CoordinateOutOfLocation(
@@ -425,7 +425,7 @@ impl Location {
         }
         let old_region_id = *self.coordinate_to_region.get(&coordinate).unwrap_or(&NO_ID);
 
-        let merge_ids: Vec<ID> = neighbours
+        let merge_ids: HashSet<ID> = neighbours
             .iter()
             .filter_map(|c| self.region_at(*c))
             .filter(|r| region_id != r.id)
@@ -438,7 +438,7 @@ impl Location {
 
     /// Merge region with `src_ids` into region with `dst_id`.
     /// This will panic if IDs are bad.
-    fn merge_regions(&mut self, src_ids: Vec<ID>, dst_id: ID) {
+    fn merge_regions(&mut self, src_ids: HashSet<ID>, dst_id: ID) {
         if src_ids.is_empty() {
             return;
         }
@@ -488,7 +488,10 @@ impl Location {
                 self.remove_coordinate_from_region(region_id, *coordinate);
                 self.coordinate_to_region.insert(*coordinate, new_id);
             }
-            Region::new(new_id, Player::new(owner_id), coordinates);
+            self.regions.insert(
+                new_id,
+                Region::new(new_id, Player::new(owner_id), coordinates),
+            );
         }
     }
 
@@ -497,7 +500,10 @@ impl Location {
     fn region_part_to_remove(&self, region_id: ID) -> Option<HashSet<Coord>> {
         let region = &self.regions[&region_id];
         let start = *region.coordinates.iter().next().unwrap();
-        let coords = self.bfs_set(start, |c| self.coordinate_to_region[&c].eq(&region_id));
+        let coords = self.bfs_set(start, |c| {
+            self.coordinate_to_region.contains_key(&c)
+                && self.coordinate_to_region[&c].eq(&region_id)
+        });
 
         if coords.eq(&region.coordinates) {
             None
@@ -605,7 +611,11 @@ mod test {
     use std::collections::{HashMap, HashSet};
 
     use super::TileSurface::*;
-    use super::{Coord, Location, LocationValidationError, Player, Region, Tile, TileSurface};
+    use super::{
+        Coord, Location, LocationModificationError, LocationValidationError, Player, Region, Tile,
+        TileSurface,
+    };
+    use game::ids::IdProducer;
     use game::unit::{Unit, UnitType};
 
     /// This test method creates a small hex map like this one:
@@ -781,6 +791,21 @@ mod test {
     }
 
     #[test]
+    fn location_place_unit_error_out_of_border() {
+        let mut location = create_valid_location();
+        let c = Coord::new(-2, 1);
+
+        let unit = Unit::new(22, UnitType::Grave);
+        let res = location.place_unit(unit.clone(), c);
+
+        assert_eq!(
+            res,
+            Err(LocationModificationError::CoordinateOutOfLocation(c))
+        );
+        assert!(location.tile_at(c).is_none());
+    }
+
+    #[test]
     fn location_move_unit_correct() {
         let mut location = create_valid_location();
         let src = Coord::new(-1, 1);
@@ -795,6 +820,211 @@ mod test {
 
         assert_eq!(location.tile_at(src).unwrap().unit(), &None);
         assert!(location.tile_at(dst).unwrap().unit().eq(&Some(unit)));
+    }
+
+    #[test]
+    fn location_move_unit_error_no_dst() {
+        let mut location = create_valid_location();
+        let src = Coord::new(-1, 1);
+        let dst = Coord::new(2, -1);
+        let unit = Unit::new(22, UnitType::Grave);
+        location.place_unit(unit.clone(), src).unwrap();
+
+        assert!(location.tile_at(src).unwrap().unit().eq(&Some(unit)));
+        assert_eq!(location.tile_at(dst), None);
+
+        let res = location.move_unit(src, dst);
+
+        assert_eq!(
+            res,
+            Err(LocationModificationError::CoordinateOutOfLocation(dst))
+        );
+        assert!(location.tile_at(src).unwrap().unit().eq(&Some(unit)));
+        assert_eq!(location.tile_at(dst), None);
+    }
+
+    #[test]
+    fn location_move_unit_error_no_src() {
+        let mut location = create_valid_location();
+        let src = Coord::new(-1, 3);
+        let dst = Coord::new(1, -1);
+
+        assert_eq!(location.tile_at(src), None);
+
+        let res = location.move_unit(src, dst);
+
+        assert_eq!(
+            res,
+            Err(LocationModificationError::CoordinateOutOfLocation(src))
+        );
+        assert_eq!(location.tile_at(src), None);
+    }
+
+    #[test]
+    fn location_move_unit_error_no_unit() {
+        let mut location = create_valid_location();
+        let src = Coord::new(-1, 1);
+        let dst = Coord::new(1, -1);
+
+        assert_eq!(location.tile_at(src).unwrap().unit(), &None);
+        assert_eq!(location.tile_at(dst).unwrap().unit(), &None);
+
+        let res = location.move_unit(src, dst);
+
+        assert_eq!(res, Err(LocationModificationError::NoUnitAtCoordinate(src)));
+        assert_eq!(location.tile_at(src).unwrap().unit(), &None);
+        assert_eq!(location.tile_at(dst).unwrap().unit(), &None);
+    }
+
+    #[test]
+    fn location_coord_to_region_correct_basic() {
+        let mut location = create_valid_location();
+        let mut id_producer = IdProducer::default();
+        let c = Coord::new(0, 0);
+        location
+            .add_tile_to_region(c, 12, &mut id_producer)
+            .unwrap();
+
+        let region = &location.regions[&12];
+        assert_eq!(region.coordinates.len(), 2);
+        assert!(region.coordinates.contains(&c));
+        assert!(region.coordinates.contains(&Coord::new(-1, 1)));
+
+        let region = &location.regions[&13];
+        assert_eq!(region.coordinates.len(), 1);
+        assert!(region.coordinates.contains(&Coord::new(1, -1)));
+    }
+
+    #[test]
+    fn location_coord_to_region_correct_remove() {
+        let mut location = create_valid_location();
+        let mut id_producer = IdProducer::default();
+        let c = Coord::new(-1, 1);
+        location
+            .add_tile_to_region(c, 13, &mut id_producer)
+            .unwrap();
+
+        // This region should be deleted when processing
+        assert!(!location.regions.contains_key(&12));
+
+        let region = &location.regions[&13];
+        assert_eq!(region.coordinates.len(), 3);
+        assert!(region.coordinates.contains(&c));
+        assert!(region.coordinates.contains(&Coord::new(0, 0)));
+        assert!(region.coordinates.contains(&Coord::new(1, -1)));
+    }
+
+    #[test]
+    fn location_coord_to_region_correct_merge_and_remove() {
+        let mut location = create_valid_location();
+        let mut id_producer = IdProducer::default();
+        let c = Coord::new(-1, 1);
+        location
+            .add_tile_to_region(c, 11, &mut id_producer)
+            .unwrap();
+
+        // This regions should be deleted when processing
+        assert!(!location.regions.contains_key(&12));
+        assert!(!location.regions.contains_key(&14));
+
+        let region = &location.regions[&11];
+        assert_eq!(region.coordinates.len(), 5);
+        assert!(region.coordinates.contains(&c));
+        assert!(region.coordinates.contains(&Coord::new(0, 1)));
+        assert!(region.coordinates.contains(&Coord::new(1, 0)));
+        assert!(region.coordinates.contains(&Coord::new(0, -1)));
+        assert!(region.coordinates.contains(&Coord::new(-1, 0)));
+    }
+
+    #[test]
+    fn location_coord_to_region_correct_split() {
+        let mut location = create_valid_location();
+        let mut id_producer = IdProducer::default();
+        location
+            .add_tile_to_region(Coord::new(-1, 1), 13, &mut id_producer)
+            .unwrap();
+        location
+            .add_tile_to_region(Coord::new(0, 0), 11, &mut id_producer)
+            .unwrap();
+
+        // This region should be deleted when processing
+        assert!(!location.regions.contains_key(&12));
+        assert!(!location.regions.contains_key(&14));
+
+        // This one should merge from 14
+        let region = &location.regions[&11];
+        assert_eq!(region.coordinates.len(), 5);
+        assert!(region.coordinates.contains(&Coord::new(0, 0)));
+        assert!(region.coordinates.contains(&Coord::new(0, 1)));
+        assert!(region.coordinates.contains(&Coord::new(1, 0)));
+        assert!(region.coordinates.contains(&Coord::new(0, -1)));
+        assert!(region.coordinates.contains(&Coord::new(-1, 0)));
+
+        println!("{:?}", location.regions);
+        // Other two regions should be split
+        let region = &location.regions[&13];
+        assert_eq!(region.coordinates.len(), 1);
+
+        let region = &location.regions[&1];
+        assert_eq!(region.coordinates.len(), 1);
+    }
+
+    #[test]
+    fn location_coord_to_region_error_out_of_border() {
+        let mut location = create_valid_location();
+        let mut id_producer = IdProducer::default();
+        let c = Coord::new(1, 1);
+        let res = location.add_tile_to_region(c, 11, &mut id_producer);
+
+        assert_eq!(
+            res,
+            Err(LocationModificationError::CoordinateOutOfLocation(c))
+        );
+        assert!(!location.regions()[&11].coordinates().contains(&c));
+    }
+
+    #[test]
+    fn location_coord_to_region_error_no_region() {
+        let mut location = create_valid_location();
+        let mut id_producer = IdProducer::default();
+        let c = Coord::new(-1, 0);
+        let region = 19;
+        let res = location.add_tile_to_region(c, region, &mut id_producer);
+
+        assert_eq!(res, Err(LocationModificationError::NoSuchRegion(region)));
+        assert_ne!(location.region_at(c).unwrap().id(), region);
+        assert!(!location.regions().contains_key(&region));
+    }
+
+    #[test]
+    fn location_coord_to_region_error_region_far_from_coord() {
+        let mut location = create_valid_location();
+        let mut id_producer = IdProducer::default();
+        let c = Coord::new(1, -1);
+        let region = 12;
+        let res = location.add_tile_to_region(c, region, &mut id_producer);
+
+        assert_eq!(
+            res,
+            Err(LocationModificationError::CoordinateNotAdjacentToRegion(c))
+        );
+        assert_ne!(location.region_at(c).unwrap().id(), region);
+        assert!(!location.regions()[&region].coordinates().contains(&c));
+    }
+
+    #[test]
+    fn location_coord_to_region_error_region_already_contains_coord() {
+        let mut location = create_valid_location();
+        let mut id_producer = IdProducer::default();
+        let c = Coord::new(-1, 1);
+        let region = 12;
+        let res = location.add_tile_to_region(c, region, &mut id_producer);
+
+        assert_eq!(
+            res,
+            Err(LocationModificationError::CoordinateNotAdjacentToRegion(c))
+        );
+        assert!(location.regions()[&region].coordinates().contains(&c));
     }
 
     #[test]
