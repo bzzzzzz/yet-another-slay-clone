@@ -1,10 +1,10 @@
 //! This module contains util functions and classes that help enforcing game rules
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
 
-use super::consts::MIN_LOCATION_LAND_COVERAGE_PCT;
+use super::consts::*;
 use super::ids::ID;
-use super::location::{Coord, Location, LocationValidationError};
+use super::location::{Coord, Location, LocationValidationError, Player};
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub enum LocationRulesValidationError {
@@ -95,6 +95,7 @@ pub fn validate_location(location: &Location) -> Result<(), LocationRulesValidat
     Ok(())
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub enum RegionsValidationError {
     NoActiveRegions(ID),
 }
@@ -102,9 +103,30 @@ pub enum RegionsValidationError {
 /// Validate that each active player has at least one active region
 pub fn validate_regions(
     location: &Location,
-    active_players_ids: &[ID],
-) -> Option<RegionsValidationError> {
-    unimplemented!()
+    active_players: &[Player],
+) -> Result<(), RegionsValidationError> {
+    let mut player_is_active: HashMap<ID, bool> = HashMap::default();
+
+    for region in location.regions().values() {
+        let is_active = region.coordinates().len() >= MIN_CONTROLLED_REGION_SIZE;
+        let region_id = region.owner().id();
+        let current_active_status = *player_is_active.get(&region_id).unwrap_or(&false);
+        player_is_active.insert(region_id, current_active_status || is_active);
+    }
+
+    for player in active_players.iter() {
+        if !player_is_active.contains_key(&player.id())
+            || !player_is_active.contains_key(&player.id())
+        {
+            return Err(RegionsValidationError::NoActiveRegions(player.id()));
+        }
+    }
+    for (&id, &is_active) in player_is_active.iter() {
+        if !is_active {
+            return Err(RegionsValidationError::NoActiveRegions(id));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -115,7 +137,9 @@ mod test {
     use game::location::{Coord, Location, Player, Region, Tile, TileSurface};
     use game::unit::{Unit, UnitType};
 
-    use super::{validate_location, LocationRulesValidationError};
+    use super::{
+        validate_location, validate_regions, LocationRulesValidationError, RegionsValidationError,
+    };
 
     /// This test method creates a small hex map like this one:
     ///  * *
@@ -141,13 +165,7 @@ mod test {
 
     #[test]
     fn validate_location_no_errors() {
-        let mut map = test_map([Water, Water, Land, Land, Land, Water, Land]);
-        map.get_mut(&Coord::new(0, 0))
-            .unwrap()
-            .place_unit(Unit::new(31, UnitType::Soldier));
-        map.get_mut(&Coord::new(0, -1))
-            .unwrap()
-            .place_unit(Unit::new(31, UnitType::Tower));
+        let map = test_map([Water, Water, Land, Land, Land, Water, Land]);
 
         let mut coords_one = HashSet::default();
         coords_one.insert(Coord::new(-1, 1));
@@ -158,7 +176,14 @@ mod test {
         coords_two.insert(Coord::new(1, -1));
         coords_two.insert(Coord::new(0, -1));
         let region_two = Region::new(12, Player::new(22), coords_two);
-        let location = Location::new(map, vec![region_one, region_two]).unwrap();
+        let mut location = Location::new(map, vec![region_one, region_two]).unwrap();
+        location
+            .place_unit(Unit::new(31, UnitType::Soldier), Coord::new(0, 0))
+            .unwrap();
+        location
+            .place_unit(Unit::new(32, UnitType::Tower), Coord::new(0, -1))
+            .unwrap();
+
         let res = validate_location(&location);
 
         assert_eq!(res, Ok(()));
@@ -175,13 +200,7 @@ mod test {
 
     #[test]
     fn validate_location_unconnected_land() {
-        let mut map = test_map([Land, Water, Land, Water, Land, Water, Land]);
-        map.get_mut(&Coord::new(0, 1))
-            .unwrap()
-            .place_unit(Unit::new(31, UnitType::Soldier));
-        map.get_mut(&Coord::new(0, -1))
-            .unwrap()
-            .place_unit(Unit::new(31, UnitType::Tower));
+        let map = test_map([Land, Water, Land, Water, Land, Water, Land]);
 
         let mut coords_one = HashSet::default();
         coords_one.insert(Coord::new(-1, 1));
@@ -192,7 +211,14 @@ mod test {
         coords_two.insert(Coord::new(1, -1));
         coords_two.insert(Coord::new(0, -1));
         let region_two = Region::new(12, Player::new(22), coords_two);
-        let location = Location::new(map, vec![region_one, region_two]).unwrap();
+        let mut location = Location::new(map, vec![region_one, region_two]).unwrap();
+        location
+            .place_unit(Unit::new(31, UnitType::Soldier), Coord::new(0, 1))
+            .unwrap();
+        location
+            .place_unit(Unit::new(32, UnitType::Tower), Coord::new(0, -1))
+            .unwrap();
+
         let res = validate_location(&location);
 
         assert_eq!(res, Err(LocationRulesValidationError::UnconnectedLand));
@@ -200,13 +226,7 @@ mod test {
 
     #[test]
     fn validate_location_not_covered_with_region() {
-        let mut map = test_map([Land, Water, Land, Land, Land, Water, Land]);
-        map.get_mut(&Coord::new(0, 1))
-            .unwrap()
-            .place_unit(Unit::new(31, UnitType::Soldier));
-        map.get_mut(&Coord::new(0, -1))
-            .unwrap()
-            .place_unit(Unit::new(31, UnitType::Tower));
+        let map = test_map([Land, Water, Land, Land, Land, Water, Land]);
 
         let mut coords_one = HashSet::default();
         coords_one.insert(Coord::new(-1, 1));
@@ -217,7 +237,14 @@ mod test {
         coords_two.insert(Coord::new(1, -1));
         coords_two.insert(Coord::new(0, -1));
         let region_two = Region::new(12, Player::new(22), coords_two);
-        let location = Location::new(map, vec![region_one, region_two]).unwrap();
+        let mut location = Location::new(map, vec![region_one, region_two]).unwrap();
+        location
+            .place_unit(Unit::new(31, UnitType::Soldier), Coord::new(0, 1))
+            .unwrap();
+        location
+            .place_unit(Unit::new(32, UnitType::Tower), Coord::new(0, -1))
+            .unwrap();
+
         let res = validate_location(&location);
 
         assert_eq!(
@@ -230,13 +257,7 @@ mod test {
 
     #[test]
     fn validate_location_misplaced_unit() {
-        let mut map = test_map([Water, Water, Land, Land, Land, Water, Land]);
-        map.get_mut(&Coord::new(0, 1))
-            .unwrap()
-            .place_unit(Unit::new(31, UnitType::Soldier));
-        map.get_mut(&Coord::new(0, -1))
-            .unwrap()
-            .place_unit(Unit::new(31, UnitType::Tower));
+        let map = test_map([Water, Water, Land, Land, Land, Water, Land]);
 
         let mut coords_one = HashSet::default();
         coords_one.insert(Coord::new(-1, 1));
@@ -247,7 +268,15 @@ mod test {
         coords_two.insert(Coord::new(1, -1));
         coords_two.insert(Coord::new(0, -1));
         let region_two = Region::new(12, Player::new(22), coords_two);
-        let location = Location::new(map, vec![region_one, region_two]).unwrap();
+
+        let mut location = Location::new(map, vec![region_one, region_two]).unwrap();
+        location
+            .place_unit(Unit::new(31, UnitType::Soldier), Coord::new(0, 1))
+            .unwrap();
+        location
+            .place_unit(Unit::new(32, UnitType::Tower), Coord::new(0, -1))
+            .unwrap();
+
         let res = validate_location(&location);
 
         assert_eq!(
@@ -260,13 +289,7 @@ mod test {
 
     #[test]
     fn validate_location_insufficient_land() {
-        let mut map = test_map([Water, Water, Land, Land, Land, Water, Water]);
-        map.get_mut(&Coord::new(0, 0))
-            .unwrap()
-            .place_unit(Unit::new(31, UnitType::Soldier));
-        map.get_mut(&Coord::new(0, -1))
-            .unwrap()
-            .place_unit(Unit::new(31, UnitType::Tower));
+        let map = test_map([Water, Water, Land, Land, Land, Water, Water]);
 
         let mut coords_one = HashSet::default();
         coords_one.insert(Coord::new(-1, 1));
@@ -276,7 +299,15 @@ mod test {
         let mut coords_two = HashSet::default();
         coords_two.insert(Coord::new(1, -1));
         let region_two = Region::new(12, Player::new(22), coords_two);
-        let location = Location::new(map, vec![region_one, region_two]).unwrap();
+
+        let mut location = Location::new(map, vec![region_one, region_two]).unwrap();
+        location
+            .place_unit(Unit::new(31, UnitType::Soldier), Coord::new(0, 0))
+            .unwrap();
+        location
+            .place_unit(Unit::new(32, UnitType::Tower), Coord::new(0, -1))
+            .unwrap();
+
         let res = validate_location(&location);
 
         assert_eq!(res, Err(LocationRulesValidationError::InsufficientLand(42)));
@@ -284,13 +315,7 @@ mod test {
 
     #[test]
     fn validate_location_region_contains_water() {
-        let mut map = test_map([Water, Water, Land, Land, Land, Water, Land]);
-        map.get_mut(&Coord::new(0, 0))
-            .unwrap()
-            .place_unit(Unit::new(31, UnitType::Soldier));
-        map.get_mut(&Coord::new(0, -1))
-            .unwrap()
-            .place_unit(Unit::new(31, UnitType::Tower));
+        let map = test_map([Water, Water, Land, Land, Land, Water, Land]);
 
         let mut coords_one = HashSet::default();
         coords_one.insert(Coord::new(0, 1));
@@ -302,12 +327,93 @@ mod test {
         coords_two.insert(Coord::new(1, -1));
         coords_two.insert(Coord::new(0, -1));
         let region_two = Region::new(12, Player::new(22), coords_two);
-        let location = Location::new(map, vec![region_one, region_two]).unwrap();
+        let mut location = Location::new(map, vec![region_one, region_two]).unwrap();
+        location
+            .place_unit(Unit::new(31, UnitType::Soldier), Coord::new(0, 0))
+            .unwrap();
+        location
+            .place_unit(Unit::new(32, UnitType::Tower), Coord::new(0, -1))
+            .unwrap();
         let res = validate_location(&location);
 
         assert_eq!(
             res,
             Err(LocationRulesValidationError::RegionContainsWater(11))
+        );
+    }
+
+    #[test]
+    fn validate_region() {
+        let map = test_map([Water, Water, Land, Land, Land, Water, Land]);
+
+        let mut coords_one = HashSet::default();
+        coords_one.insert(Coord::new(-1, 1));
+        coords_one.insert(Coord::new(0, 0));
+        let player_one = Player::new(21);
+        let region_one = Region::new(11, player_one, coords_one);
+
+        let mut coords_two = HashSet::default();
+        coords_two.insert(Coord::new(1, -1));
+        coords_two.insert(Coord::new(0, -1));
+        let player_two = Player::new(22);
+        let region_two = Region::new(12, player_two, coords_two);
+        let location = Location::new(map, vec![region_one, region_two]).unwrap();
+
+        let players = [player_one, player_two];
+        let res = validate_regions(&location, &players);
+
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn validate_regions_error_small_region() {
+        let map = test_map([Water, Water, Land, Land, Land, Water, Land]);
+
+        let mut coords_one = HashSet::default();
+        coords_one.insert(Coord::new(-1, 1));
+        coords_one.insert(Coord::new(0, 0));
+        let player_one = Player::new(21);
+        let region_one = Region::new(11, player_one, coords_one);
+
+        let mut coords_two = HashSet::default();
+        coords_two.insert(Coord::new(1, -1));
+        let player_two = Player::new(22);
+        let region_two = Region::new(12, player_two, coords_two);
+        let location = Location::new(map, vec![region_one, region_two]).unwrap();
+
+        let players = [player_one, player_two];
+        let res = validate_regions(&location, &players);
+
+        assert_eq!(
+            res,
+            Err(RegionsValidationError::NoActiveRegions(player_two.id()))
+        );
+    }
+
+    #[test]
+    fn validate_regions_error_no_region() {
+        let map = test_map([Water, Water, Land, Land, Land, Water, Land]);
+
+        let mut coords_one = HashSet::default();
+        coords_one.insert(Coord::new(-1, 1));
+        coords_one.insert(Coord::new(0, 0));
+        let player_one = Player::new(21);
+        let region_one = Region::new(11, player_one, coords_one);
+
+        let mut coords_two = HashSet::default();
+        coords_two.insert(Coord::new(1, -1));
+        coords_two.insert(Coord::new(0, -1));
+        let player_two = Player::new(22);
+        let region_two = Region::new(12, player_two, coords_two);
+        let location = Location::new(map, vec![region_one, region_two]).unwrap();
+
+        let player_three = Player::new(23);
+        let players = [player_one, player_two, player_three];
+        let res = validate_regions(&location, &players);
+
+        assert_eq!(
+            res,
+            Err(RegionsValidationError::NoActiveRegions(player_three.id()))
         );
     }
 }

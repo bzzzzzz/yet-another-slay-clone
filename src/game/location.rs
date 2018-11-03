@@ -76,46 +76,12 @@ impl Tile {
     }
 
     /// Remove unit from this tile and return it
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use yasc::game::location::{Tile,TileSurface};
-    /// use yasc::game::unit::{Unit,UnitType};
-    ///
-    /// let unit = Unit::new(1, UnitType::Soldier);
-    /// let mut tile = Tile::new(1, TileSurface::Land);
-    /// tile.place_unit(unit.clone());
-    ///
-    /// let taken_unit = tile.take_unit();
-    /// assert_eq!(taken_unit, Some(unit));
-    /// assert_eq!(tile.unit(), &None);
-    /// ```
-    ///
-    pub fn take_unit(&mut self) -> Option<Unit> {
+    fn take_unit(&mut self) -> Option<Unit> {
         self.unit.take()
     }
 
     /// Place unit on this tile
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use yasc::game::location::{Tile,TileSurface};
-    /// use yasc::game::unit::{Unit,UnitType};
-    ///
-    /// let unit = Unit::new(1, UnitType::Soldier);
-    /// let mut tile = Tile::new(1, TileSurface::Land);
-    /// tile.place_unit(unit.clone());
-    /// assert_eq!(tile.unit(), &Some(unit));
-    ///
-    /// // Unit will be replaced with new one
-    /// let other_unit = Unit::new(1, UnitType::Militia);
-    /// tile.place_unit(other_unit.clone());
-    /// assert_eq!(tile.unit(), &Some(other_unit));
-    /// ```
-    ///
-    pub fn place_unit(&mut self, unit: Unit) {
+    fn place_unit(&mut self, unit: Unit) {
         self.unit = Some(unit);
     }
 }
@@ -617,6 +583,30 @@ mod test {
     };
     use game::ids::IdProducer;
     use game::unit::{Unit, UnitType};
+
+    #[test]
+    fn tile_place_unit() {
+        let unit = Unit::new(1, UnitType::Soldier);
+        let mut tile = Tile::new(1, TileSurface::Land);
+        tile.place_unit(unit.clone());
+        assert_eq!(tile.unit(), &Some(unit));
+
+        // Unit will be replaced with new one
+        let other_unit = Unit::new(1, UnitType::Militia);
+        tile.place_unit(other_unit.clone());
+        assert_eq!(tile.unit(), &Some(other_unit));
+    }
+
+    #[test]
+    fn tile_take_unit() {
+        let unit = Unit::new(1, UnitType::Soldier);
+        let mut tile = Tile::new(1, TileSurface::Land);
+        tile.place_unit(unit.clone());
+
+        let taken_unit = tile.take_unit();
+        assert_eq!(taken_unit, Some(unit));
+        assert_eq!(tile.unit(), &None);
+    }
 
     /// This test method creates a small hex map like this one:
     ///  * *
