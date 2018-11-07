@@ -5,6 +5,7 @@ use std::iter::FromIterator;
 use super::consts::*;
 use super::ids::ID;
 use super::location::{Coord, Location, LocationValidationError, Player};
+use super::unit::UnitType;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub enum LocationRulesValidationError {
@@ -15,6 +16,8 @@ pub enum LocationRulesValidationError {
     InitiationError(LocationValidationError),
     MisplacedUnit(Coord),
     RegionContainsWater(ID),
+    ActiveRegionWithoutCapital(ID),
+    MultiplyCapitals(ID),
 }
 
 impl From<LocationValidationError> for LocationRulesValidationError {
@@ -30,6 +33,7 @@ impl From<LocationValidationError> for LocationRulesValidationError {
 /// - Land should be fully covered with nonintersecting regions;
 /// - All regions should cover only land, not water;
 /// - All units should be places on land, not on water;
+/// - Each region should have one village capital;
 ///
 pub fn validate_location(location: &Location) -> Result<(), LocationRulesValidationError> {
     // Start with checking general location consistency
@@ -88,6 +92,30 @@ pub fn validate_location(location: &Location) -> Result<(), LocationRulesValidat
     for (coordinate, tile) in location.map().iter() {
         if tile.unit().is_some() && tile.surface().is_water() {
             return Err(LocationRulesValidationError::MisplacedUnit(*coordinate));
+        }
+    }
+
+    // Check if there are regions without capitals
+    for (id, region) in location.regions() {
+        if region.coordinates().len() < MIN_CONTROLLED_REGION_SIZE {
+            continue;
+        }
+        let mut capitals = 0;
+        for &coordinate in region.coordinates() {
+            let tile = location.tile_at(coordinate).unwrap();
+            if let Some(unit) = tile.unit() {
+                if unit.description().name == UnitType::Village {
+                    capitals += 1;
+                }
+            }
+        }
+
+        if capitals == 0 {
+            return Err(LocationRulesValidationError::ActiveRegionWithoutCapital(
+                *id,
+            ));
+        } else if capitals > 1 {
+            return Err(LocationRulesValidationError::MultiplyCapitals(*id));
         }
     }
 
@@ -181,12 +209,82 @@ mod test {
             .place_unit(Unit::new(31, UnitType::Soldier), Coord::new(0, 0))
             .unwrap();
         location
+            .place_unit(Unit::new(33, UnitType::Village), Coord::new(-1, 1))
+            .unwrap();
+        location
             .place_unit(Unit::new(32, UnitType::Tower), Coord::new(0, -1))
+            .unwrap();
+        location
+            .place_unit(Unit::new(34, UnitType::Village), Coord::new(1, -1))
             .unwrap();
 
         let res = validate_location(&location);
 
         assert_eq!(res, Ok(()));
+    }
+
+    #[test]
+    fn validate_location_no_capital() {
+        let map = test_map([Water, Water, Land, Land, Land, Water, Land]);
+
+        let mut coords_one = HashSet::default();
+        coords_one.insert(Coord::new(-1, 1));
+        coords_one.insert(Coord::new(0, 0));
+        let region_one = Region::new(11, Player::new(21), coords_one);
+
+        let mut coords_two = HashSet::default();
+        coords_two.insert(Coord::new(1, -1));
+        coords_two.insert(Coord::new(0, -1));
+        let region_two = Region::new(12, Player::new(22), coords_two);
+        let mut location = Location::new(map, vec![region_one, region_two]).unwrap();
+        location
+            .place_unit(Unit::new(31, UnitType::Soldier), Coord::new(0, 0))
+            .unwrap();
+        location
+            .place_unit(Unit::new(32, UnitType::Tower), Coord::new(0, -1))
+            .unwrap();
+        location
+            .place_unit(Unit::new(34, UnitType::Village), Coord::new(1, -1))
+            .unwrap();
+
+        let res = validate_location(&location);
+
+        assert_eq!(
+            res,
+            Err(LocationRulesValidationError::ActiveRegionWithoutCapital(11))
+        );
+    }
+
+    #[test]
+    fn validate_location_two_capitals() {
+        let map = test_map([Water, Water, Land, Land, Land, Water, Land]);
+
+        let mut coords_one = HashSet::default();
+        coords_one.insert(Coord::new(-1, 1));
+        coords_one.insert(Coord::new(0, 0));
+        let region_one = Region::new(11, Player::new(21), coords_one);
+
+        let mut coords_two = HashSet::default();
+        coords_two.insert(Coord::new(1, -1));
+        coords_two.insert(Coord::new(0, -1));
+        let region_two = Region::new(12, Player::new(22), coords_two);
+        let mut location = Location::new(map, vec![region_one, region_two]).unwrap();
+        location
+            .place_unit(Unit::new(31, UnitType::Soldier), Coord::new(0, 0))
+            .unwrap();
+        location
+            .place_unit(Unit::new(33, UnitType::Village), Coord::new(-1, 1))
+            .unwrap();
+        location
+            .place_unit(Unit::new(32, UnitType::Village), Coord::new(0, -1))
+            .unwrap();
+        location
+            .place_unit(Unit::new(34, UnitType::Village), Coord::new(1, -1))
+            .unwrap();
+
+        let res = validate_location(&location);
+
+        assert_eq!(res, Err(LocationRulesValidationError::MultiplyCapitals(12)));
     }
 
     #[test]

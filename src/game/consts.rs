@@ -3,6 +3,8 @@ use super::unit::{UnitDescription, UnitType};
 
 pub const MIN_CONTROLLED_REGION_SIZE: usize = 2;
 
+pub const EMPTY_TILE_INCOME: i32 = 1;
+
 pub const CONTROLLED_REGION_STARTING_MONEY: i32 = 10;
 
 pub const MIN_LOCATION_LAND_COVERAGE_PCT: u8 = 50;
