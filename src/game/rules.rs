@@ -1,6 +1,5 @@
 //! This module contains util functions and classes that help enforcing game rules
-use std::collections::{HashMap, HashSet};
-use std::iter::FromIterator;
+use std::collections::HashMap;
 
 use super::consts::*;
 use super::ids::ID;
@@ -66,10 +65,9 @@ pub fn validate_location(location: &Location) -> Result<(), LocationRulesValidat
     }
 
     // Check if there are pieces of land that do not have ground connection
-    let land = location.bfs_iter(first_land.unwrap(), |c| {
+    let land = location.bfs_set(first_land.unwrap(), |c| {
         location.tile_at(c).map_or(false, |t| t.surface().is_land())
     });
-    let land: HashSet<Coord> = HashSet::from_iter(land);
 
     for (coordinate, tile) in location.map().iter() {
         if tile.surface().is_land() && !land.contains(coordinate) {

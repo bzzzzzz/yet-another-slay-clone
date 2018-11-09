@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::iter::FromIterator;
 
 use hex2d::Coordinate;
 
@@ -257,8 +256,7 @@ impl Location {
         // Check if there are regions with unconnected land
         for (_, region) in location.regions.iter() {
             if let Some(c) = region.coordinates.iter().next() {
-                let result = location.bfs_iter(*c, |c| region.coordinates.contains(&c));
-                let result: HashSet<Coord> = HashSet::from_iter(result);
+                let result = location.bfs_set(*c, |c| region.coordinates.contains(&c));
                 let wrong = region.coordinates.iter().find(|c| !result.contains(c));
                 if wrong.is_some() {
                     return Err(LocationValidationError::SplitRegions(region.id));
@@ -268,7 +266,7 @@ impl Location {
 
         // Check if there are no regions of the same owner sharing the border
         let (&start, _) = location.map.iter().next().unwrap();
-        for coord in location.bfs_iter(start, |_| true) {
+        for (_, coord) in location.bfs_iter(start, |_| true) {
             let region = location.region_at(coord);
             if region.is_none() {
                 continue;
@@ -575,7 +573,9 @@ impl Location {
     where
         P: Fn(Coord) -> bool,
     {
-        self.bfs_iter(coordinate, predicate).collect()
+        self.bfs_iter(coordinate, predicate)
+            .map(|(_, c)| c)
+            .collect()
     }
 
     /// Perform a BFS on the location, starting from provided coordinate. Return a set
@@ -587,7 +587,9 @@ impl Location {
     where
         P: Fn(Coord) -> bool,
     {
-        self.bfs_iter(coordinate, predicate).collect()
+        self.bfs_iter(coordinate, predicate)
+            .map(|(_, c)| c)
+            .collect()
     }
 
     /// Return an iterator that performs a BFS on the location, starting from provided coordinate.
@@ -599,6 +601,18 @@ impl Location {
         P: Fn(Coord) -> bool,
     {
         BfsIter::new(&self, coordinate, predicate)
+    }
+
+    /// Perform BFS to return shortest distance between two coordinates using only coordinates that
+    /// match the predicate.
+    /// Returns `None` if there is no path between coordinates
+    pub fn bfs_distance<P>(&self, from: Coord, to: Coord, predicate: P) -> Option<u32>
+    where
+        P: Fn(Coord) -> bool,
+    {
+        self.bfs_iter(from, predicate)
+            .find(|(_, coord)| *coord == to)
+            .map(|(dist, _)| dist)
     }
 }
 
@@ -629,17 +643,17 @@ where
         }
     }
 
-    fn process_and_return(&mut self, step: u32, coordinate: Coord) -> Coord {
+    fn process_and_return(&mut self, distance: u32, coordinate: Coord) -> (u32, Coord) {
         for neighbor in coordinate.neighbors().iter() {
             if !self.processed.contains(neighbor)
                 && self.location.tile_at(*neighbor).is_some()
                 && (self.predicate)(*neighbor)
             {
-                self.queue.push_back((step + 1, *neighbor));
+                self.queue.push_back((distance + 1, *neighbor));
             }
             self.processed.insert(*neighbor);
         }
-        coordinate
+        (distance, coordinate)
     }
 }
 
@@ -647,9 +661,9 @@ impl<'a, P> Iterator for BfsIter<'a, P>
 where
     P: Fn(Coord) -> bool,
 {
-    type Item = Coord;
+    type Item = (u32, Coord);
 
-    fn next(&mut self) -> Option<Coord> {
+    fn next(&mut self) -> Option<(u32, Coord)> {
         self.queue
             .pop_front()
             .map(|(step, coordinate)| self.process_and_return(step, coordinate))
@@ -1195,5 +1209,35 @@ mod test {
             location.tile_at(c).map_or(false, |t| t.surface().is_land())
         });
         assert!(coords.is_empty());
+    }
+
+    #[test]
+    fn bfs_distance_returns_correct_some() {
+        let map = test_map([Land, Land, Water, Land, Land, Land, Water]);
+        let location = Location::new(map, Vec::new()).unwrap();
+        let distance = location.bfs_distance(Coord::new(-1, 0), Coord::new(0, 1), |c| {
+            location.tile_at(c).map_or(false, |t| t.surface().is_land())
+        });
+        assert_eq!(distance, Some(2));
+    }
+
+    #[test]
+    fn bfs_distance_returns_correct_to_itself() {
+        let map = test_map([Land, Land, Water, Land, Land, Land, Water]);
+        let location = Location::new(map, Vec::new()).unwrap();
+        let distance = location.bfs_distance(Coord::new(-1, 0), Coord::new(-1, 0), |c| {
+            location.tile_at(c).map_or(false, |t| t.surface().is_land())
+        });
+        assert_eq!(distance, Some(0));
+    }
+
+    #[test]
+    fn bfs_distance_returns_correct_no_passage() {
+        let map = test_map([Land, Land, Water, Water, Land, Land, Water]);
+        let location = Location::new(map, Vec::new()).unwrap();
+        let distance = location.bfs_distance(Coord::new(-1, 0), Coord::new(0, 1), |c| {
+            location.tile_at(c).map_or(false, |t| t.surface().is_land())
+        });
+        assert_eq!(distance, None);
     }
 }
