@@ -4,9 +4,40 @@ use std::iter::FromIterator;
 use hex2d::Coordinate;
 
 use super::ids::{IdProducer, ID, NO_ID};
-use super::unit::Unit;
 
 pub type Coord = Coordinate<i32>;
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
+pub enum UnitType {
+    Grave,
+    Tree,
+    Village,
+    Tower,
+    GreatKnight,
+    Knight,
+    Soldier,
+    Militia,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
+pub struct Unit {
+    id: ID,
+    unit_type: UnitType,
+}
+
+impl Unit {
+    pub fn new(id: ID, unit_type: UnitType) -> Self {
+        Self { id, unit_type }
+    }
+
+    pub fn id(self) -> ID {
+        self.id
+    }
+
+    pub fn unit_type(self) -> UnitType {
+        self.unit_type
+    }
+}
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub enum TileSurface {
@@ -159,7 +190,7 @@ pub enum LocationModificationError {
     InvalidResult(LocationValidationError),
 }
 
-#[derive(Debug)]
+#[derive(Eq, PartialEq, Debug)]
 pub struct Location {
     map: HashMap<Coord, Tile>,
     regions: HashMap<ID, Region>,
@@ -636,10 +667,9 @@ mod test {
     use super::TileSurface::*;
     use super::{
         Coord, Location, LocationModificationError, LocationValidationError, Player, Region,
-        RegionTransformation, Tile, TileSurface,
+        RegionTransformation, Tile, TileSurface, Unit, UnitType,
     };
     use game::ids::IdProducer;
-    use game::unit::{Unit, UnitType};
 
     #[test]
     fn tile_place_unit() {

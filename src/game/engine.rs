@@ -3,13 +3,16 @@ use std::collections::{HashMap, HashSet};
 use super::consts::*;
 use super::ids::{IdProducer, ID};
 use super::location::{
-    Coord, Location, LocationModificationError, Player, Region, RegionTransformation,
+    Coord, Location, LocationModificationError, Player, Region, RegionTransformation, Unit,
+    UnitType,
 };
 use super::rules::{
     validate_location, validate_regions, LocationRulesValidationError, RegionsValidationError,
 };
-use super::unit::{Unit, UnitType};
+use super::unit::{can_defeat, description, UnitInfo};
 
+/// An error that can be returned as a result of game engine self validation process.
+/// This is just a container for underlying errors
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub enum EngineValidationError {
     LocationError(LocationRulesValidationError),
@@ -28,11 +31,12 @@ impl From<RegionsValidationError> for EngineValidationError {
     }
 }
 
+/// Description of actions that player can do
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub enum PlayerAction {
     PlaceNewUnit(UnitType, Coord),
     UpgradeUnit(Coord),
-    MoveUnit(Coord, Coord),
+    MoveUnit { src: Coord, dst: Coord },
     EndTurn,
 }
 
@@ -56,6 +60,8 @@ impl From<LocationModificationError> for PlayerActionError {
     }
 }
 
+/// Regional information that is stored on game engine level
+/// money_balance value is stored only here, other values are recountable and stored only for caching purposes
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 struct RegionInfo {
     money_balance: i32,
@@ -86,8 +92,8 @@ impl RegionInfo {
         for coordinate in region.coordinates().iter() {
             let tile = location.tile_at(*coordinate).unwrap();
             new_income += EMPTY_TILE_INCOME;
-            if tile.unit().is_some() {
-                new_maintenance += tile.unit().unwrap().description().turn_cost;
+            if let Some(unit) = tile.unit() {
+                new_maintenance += description(unit.unit_type()).turn_cost;
             }
         }
         self.income_from_fields = new_income;
@@ -95,45 +101,70 @@ impl RegionInfo {
     }
 }
 
+/// Game engine struct stores the whole state of the game and allows players to make their turns
+#[derive(Eq, PartialEq, Debug)]
 pub struct GameEngine {
     players: Vec<Player>,
     player_activity: HashMap<ID, bool>,
     winner: Option<ID>,
     current_turn: u32,
     active_player_num: usize,
-    region_money: HashMap<ID, RegionInfo>,
+
     location: Location,
+    region_info: HashMap<ID, RegionInfo>,
+    unit_info: HashMap<ID, UnitInfo>,
+
     id_producer: IdProducer,
 }
 
 impl GameEngine {
     pub fn new(location: Location, players: Vec<Player>) -> Result<Self, EngineValidationError> {
-        validate_location(&location)?;
-        validate_regions(&location, players.as_slice())?;
-
-        let mut region_money = HashMap::default();
+        let mut region_info = HashMap::default();
         for (id, region) in location.regions().iter() {
             let money = if region.coordinates().len() > MIN_CONTROLLED_REGION_SIZE {
                 RegionInfo::new(CONTROLLED_REGION_STARTING_MONEY)
             } else {
                 RegionInfo::new(0)
             };
-            region_money.insert(id.clone(), money);
+            region_info.insert(id.clone(), money);
         }
         let player_activity: HashMap<ID, bool> = players.iter().map(|p| (p.id(), true)).collect();
+        let unit_info: HashMap<ID, UnitInfo> = location
+            .map()
+            .values()
+            .filter_map(|t| t.unit())
+            .map(|u| (u.id(), UnitInfo::from(*u)))
+            .collect();
         let mut engine = Self {
             location,
             players,
             player_activity,
-            region_money,
+            unit_info,
+            region_info,
             winner: None,
             current_turn: 1,
             active_player_num: 0,
             id_producer: IdProducer::default(),
         };
         engine.recount_region_info();
+        engine.validate()?;
 
         Ok(engine)
+    }
+
+    /// Check that locations is consistent and everything is placed corresponding to game rules
+    pub fn validate(&self) -> Result<(), EngineValidationError> {
+        let active_players: Vec<Player> = self
+            .players
+            .iter()
+            .filter(|p| self.player_activity[&p.id()])
+            .cloned()
+            .collect();
+
+        validate_location(&self.location)?;
+        validate_regions(&self.location, &active_players.as_slice())?;
+
+        Ok(())
     }
 
     pub fn players(&self) -> &Vec<Player> {
@@ -149,7 +180,7 @@ impl GameEngine {
     }
 
     pub fn region_money(&self, region_id: ID) -> Option<i32> {
-        self.region_money.get(&region_id).map(|ri| ri.money_balance)
+        self.region_info.get(&region_id).map(|ri| ri.money_balance)
     }
 
     pub fn active_player_num(&self) -> usize {
@@ -160,33 +191,79 @@ impl GameEngine {
         &self.players[self.active_player_num]
     }
 
+    /// Perform an action for specified player
     pub fn act(&mut self, player_id: ID, action: PlayerAction) -> Result<(), PlayerActionError> {
         self.validate_action(player_id, &action)?;
 
         match action {
-            PlayerAction::MoveUnit(src, dst) => self.move_unit(player_id, src, dst)?,
+            PlayerAction::MoveUnit { src, dst } => self.move_unit(player_id, src, dst)?,
             PlayerAction::PlaceNewUnit(unit, dst) => self.place_new_unit(player_id, unit, dst)?,
             PlayerAction::UpgradeUnit(dst) => self.upgrade_unit(player_id, dst)?,
             PlayerAction::EndTurn => self.end_players_turn(),
         }
 
         self.recount_region_info();
+        self.check_for_active_players();
+        self.validate()
+            .expect("Engine state should be always valid after an action");
 
         Ok(())
     }
 
+    /// Check if some active players became unactive and update engine information about them
+    fn check_for_active_players(&mut self) {
+        let mut owner_to_active_regions_num: HashMap<ID, u32> = HashMap::new();
+        for region in self.location.regions().values() {
+            if region.coordinates().len() < MIN_CONTROLLED_REGION_SIZE {
+                let coordinate = *region.coordinates().iter().next().unwrap();
+                // If there is a moving unit on last tile of region - it is still active
+                if let Some(unit) = self.location.tile_at(coordinate).unwrap().unit() {
+                    if description(unit.unit_type()).max_moves == 0 {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+            }
+            let mut num = *owner_to_active_regions_num
+                .get(&region.owner().id())
+                .unwrap_or(&0);
+            num += 1;
+            owner_to_active_regions_num.insert(region.owner().id(), num);
+        }
+        let set_inactive: Vec<ID> = self
+            .player_activity
+            .iter()
+            .filter(|(_, &is_active)| is_active)
+            .filter(|(id, _)| {
+                owner_to_active_regions_num
+                    .get(id)
+                    .map(|&n| n == 0)
+                    .unwrap_or(true)
+            }).map(|(id, _)| *id)
+            .collect();
+
+        for id in set_inactive.into_iter() {
+            self.player_activity.insert(id, false);
+        }
+    }
+
+    /// Update region info for each region on the map
     fn recount_region_info(&mut self) {
         for (id, region) in self.location.regions() {
-            let mut info = self.region_money[id];
+            let mut info = self.region_info[id];
             info.recount(region, &self.location);
         }
     }
 
+    /// Add provided amount of money to the region
+    /// This method assumes that region exists and will panic if not
     fn modify_money(&mut self, region_id: ID, amount: i32) {
-        let ri = self.region_money.get_mut(&region_id).unwrap();
+        let ri = self.region_info.get_mut(&region_id).unwrap();
         ri.change_balance(amount);
     }
 
+    /// Return a region at specified coordinate
     fn region_at(&self, coordinate: Coord) -> Result<&Region, PlayerActionError> {
         self.location
             .region_at(coordinate)
@@ -195,64 +272,73 @@ impl GameEngine {
             .ok_or_else(|| PlayerActionError::InaccessibleLocation(coordinate))
     }
 
+    fn unit_info(&self, unit_id: ID) -> &UnitInfo {
+        &self.unit_info[&unit_id]
+    }
+
+    /// Check and prepare everything required for placing a unit on a new coordinate
+    /// Returns a tuple with
     fn prepare_placing_unit(
         &self,
         player_id: ID,
-        unit: &Unit,
+        unit: Unit,
         dst: Coord,
-    ) -> Result<(ID, bool), PlayerActionError> {
+    ) -> Result<(ID, bool, Option<ID>), PlayerActionError> {
         let dst_region = self.region_at(dst)?;
-        let mut paying_region_id = dst_region.id();
-
-        let need_relocation = if dst_region.owner().id() != player_id {
+        let (paying_region_id, need_relocation) = if dst_region.owner().id() != player_id {
             let neighbours = dst.neighbors();
             let regions_to_check: Vec<&Region> = neighbours
                 .iter()
                 .filter(|&n| self.location.tile_at(*n).is_some())
                 .filter_map(|&n| self.location.region_at(n))
                 .filter(|r| r.owner().id() == player_id)
-                .filter(|r| self.region_money[&r.id()].can_afford(unit.description().purchase_cost))
-                .collect();
+                .filter(|r| {
+                    self.region_info[&r.id()]
+                        .can_afford(description(unit.unit_type()).purchase_cost)
+                }).collect();
             if regions_to_check.is_empty() {
                 return Err(PlayerActionError::CannotAttack(dst));
             }
-            paying_region_id = regions_to_check[0].id();
 
-            true
+            (regions_to_check[0].id(), true)
         } else {
-            false
+            (dst_region.id(), false)
         };
 
         let tile = self.location.tile_at(dst).unwrap();
-        if tile.unit().is_some() {
+        let old_unit_to_remove = if let Some(current_unit) = tile.unit() {
             // We cannot replace unit of the same owner
             if dst_region.owner().id() == player_id {
                 return Err(PlayerActionError::AlreadyOccupied(dst));
             }
             // But we can replace other player's unit if we defeat it
-            if tile.unit().unwrap().description().defence >= unit.description().attack {
+            if !can_defeat(unit, *current_unit) {
                 return Err(PlayerActionError::CannotAttack(dst));
             }
-        }
 
-        Ok((paying_region_id, need_relocation))
+            Some(current_unit.id())
+        } else {
+            None
+        };
+
+        Ok((paying_region_id, need_relocation, old_unit_to_remove))
     }
 
     fn prepare_buying_unit(
         &self,
         player_id: ID,
-        unit: &Unit,
+        unit: Unit,
         dst: Coord,
-    ) -> Result<(ID, bool), PlayerActionError> {
-        let (paying_region_id, need_relocation) =
+    ) -> Result<(ID, bool, Option<ID>), PlayerActionError> {
+        let (paying_region_id, need_relocation, old_unit_to_remove) =
             self.prepare_placing_unit(player_id, unit, dst)?;
 
-        let region_info = self.region_money[&paying_region_id];
-        if !region_info.can_afford(unit.description().purchase_cost) {
+        let region_info = self.region_info[&paying_region_id];
+        if !region_info.can_afford(description(unit.unit_type()).purchase_cost) {
             return Err(PlayerActionError::NotEnoughMoney(paying_region_id));
         }
 
-        Ok((paying_region_id, need_relocation))
+        Ok((paying_region_id, need_relocation, old_unit_to_remove))
     }
 
     fn place_new_unit(
@@ -261,15 +347,20 @@ impl GameEngine {
         unit_type: UnitType,
         dst: Coord,
     ) -> Result<(), PlayerActionError> {
-        let unit = Unit::new(self.id_producer.next(), unit_type);
-        let (region_id, need_relocation) = self.prepare_buying_unit(player_id, &unit, dst)?;
+        let (unit, unit_info) = UnitInfo::new(self.id_producer.next(), unit_type);
+        let (region_id, need_relocation, old_unit_to_remove) =
+            self.prepare_buying_unit(player_id, unit, dst)?;
 
         if need_relocation {
             self.add_tile_to_region(dst, region_id)?;
         }
         self.location.place_unit(unit, dst)?;
 
-        self.modify_money(region_id, 0 - unit.description().purchase_cost);
+        if let Some(old_unit_id) = old_unit_to_remove {
+            self.unit_info.remove(&old_unit_id);
+        }
+        self.unit_info.insert(unit.id(), unit_info);
+        self.modify_money(region_id, 0 - description(unit.unit_type()).purchase_cost);
 
         Ok(())
     }
@@ -286,7 +377,7 @@ impl GameEngine {
         for change in res.iter() {
             match change {
                 RegionTransformation::Delete(id) => {
-                    self.region_money.remove(&id);
+                    self.region_info.remove(&id);
                 }
                 RegionTransformation::Merge { from, into } => self.merge_regions(*from, *into),
                 RegionTransformation::Split { from, into } => {
@@ -299,15 +390,15 @@ impl GameEngine {
     }
 
     fn merge_regions(&mut self, from: ID, into: ID) {
-        let src = self.region_money.remove(&from).unwrap();
-        let dst = self.region_money.get_mut(&into).unwrap();
-        dst.money_balance += src.money_balance;
+        let src = self.region_info.remove(&from).unwrap();
+        let dst = self.region_info.get_mut(&into).unwrap();
+        dst.change_balance(src.money_balance);
         dst.maintenance_cost += src.maintenance_cost;
         dst.income_from_fields += src.income_from_fields;
     }
 
     fn split_region(&mut self, from: ID, into: Vec<ID>) {
-        let src = self.region_money.remove(&from).unwrap();
+        let src = self.region_info.remove(&from).unwrap();
         let mut insert = Vec::new();
         let mut new_money_owners = Vec::new();
         for region_id in into.into_iter() {
@@ -326,11 +417,11 @@ impl GameEngine {
                 let info_part = if rest > 0 { part + 1 } else { part };
                 rest -= 1;
                 let info = RegionInfo::new(info_part);
-                self.region_money.insert(id, info);
+                self.region_info.insert(id, info);
             }
         }
         for (id, info) in insert.into_iter() {
-            self.region_money.insert(id, info);
+            self.region_info.insert(id, info);
         }
     }
 
@@ -339,7 +430,7 @@ impl GameEngine {
         player_id: ID,
         src: Coord,
         dst: Coord,
-    ) -> Result<(ID, bool), PlayerActionError> {
+    ) -> Result<(ID, u32, ID, bool, Option<ID>), PlayerActionError> {
         let unit = self
             .location
             .tile_at(src)
@@ -348,8 +439,24 @@ impl GameEngine {
         if unit.is_none() {
             return Err(PlayerActionError::NoUnit(dst));
         }
+        let unit = unit.unwrap();
 
-        self.prepare_placing_unit(player_id, unit.unwrap(), dst)
+        let (region_id, need_relocation, old_unit_id_to_remove) =
+            self.prepare_placing_unit(player_id, *unit, dst)?;
+
+        let moves = 10;
+        let unit_info = self.unit_info(unit.id());
+        if unit_info.moves_left() < moves {
+            return Err(PlayerActionError::InaccessibleLocation(dst));
+        }
+
+        Ok((
+            unit.id(),
+            moves,
+            region_id,
+            need_relocation,
+            old_unit_id_to_remove,
+        ))
     }
 
     fn move_unit(
@@ -358,12 +465,20 @@ impl GameEngine {
         src: Coord,
         dst: Coord,
     ) -> Result<(), PlayerActionError> {
-        let (region_id, need_relocation) = self.prepare_moving_unit(player_id, src, dst)?;
+        let (unit_id, moves_num, region_id, need_relocation, old_unit_id_to_remove) =
+            self.prepare_moving_unit(player_id, src, dst)?;
 
         if need_relocation {
             self.add_tile_to_region(dst, region_id)?;
         }
         self.location.move_unit(src, dst)?;
+        self.unit_info
+            .get_mut(&unit_id)
+            .unwrap()
+            .subtract_moves(moves_num);
+        if let Some(old_unit_id) = old_unit_id_to_remove {
+            self.unit_info.remove(&old_unit_id);
+        }
 
         Ok(())
     }
@@ -383,15 +498,16 @@ impl GameEngine {
         }
         let old_unit = old_unit.unwrap();
 
-        let new_unit_description = old_unit.description().upgrades_to;
+        let old_unit_description = description(old_unit.unit_type());
+        let new_unit_description = old_unit_description.upgrades_to;
         if new_unit_description.is_none() {
-            return Err(PlayerActionError::NoUpgrade(old_unit.description().name));
+            return Err(PlayerActionError::NoUpgrade(old_unit_description.name));
         }
         let new_unit_description = new_unit_description.unwrap();
 
-        let sum = new_unit_description.purchase_cost - old_unit.description().purchase_cost;
+        let sum = new_unit_description.purchase_cost - old_unit_description.purchase_cost;
 
-        let region_info = self.region_money[&region.id()];
+        let region_info = self.region_info[&region.id()];
         if !region_info.can_afford(sum) {
             return Err(PlayerActionError::NotEnoughMoney(region.id()));
         }
@@ -461,7 +577,7 @@ impl GameEngine {
         for (&coord, tile) in self.location.map().iter() {
             if tile
                 .unit()
-                .map_or(false, |u| u.description().name == UnitType::Grave)
+                .map_or(false, |u| u.unit_type() == UnitType::Grave)
             {
                 to_delete.push(coord);
             }
@@ -472,15 +588,21 @@ impl GameEngine {
     }
 
     fn apply_income(&mut self) {
-        for info in self.region_money.values_mut() {
+        for info in self.region_info.values_mut() {
             let sum = info.income_from_fields - info.maintenance_cost;
             info.change_balance(sum);
         }
     }
 
+    fn refill_moves(&mut self) {
+        for info in self.unit_info.values_mut() {
+            info.refill_moves();
+        }
+    }
+
     fn kill_starving_units(&mut self) {
         let regions_to_check: Vec<ID> = self
-            .region_money
+            .region_info
             .iter()
             .filter(|(_, r)| r.money_balance < 0)
             .map(|(id, _)| *id)
@@ -503,9 +625,8 @@ impl GameEngine {
             .location
             .map()
             .iter()
-            .filter(|(_, t)| {
-                t.unit().is_some() && t.unit().unwrap().description().name == UnitType::Tree
-            }).flat_map(|(&c, _)| {
+            .filter(|(_, t)| t.unit().is_some() && t.unit().unwrap().unit_type() == UnitType::Tree)
+            .flat_map(|(&c, _)| {
                 let n = c.neighbors();
                 let mut m = Vec::new();
                 m.extend(n.iter());
@@ -527,6 +648,7 @@ impl GameEngine {
         // Set of end-of-turn actions. Order is important.
         self.remove_graves();
         self.apply_income();
+        self.refill_moves();
         self.kill_starving_units();
         self.spread_forests();
         self.check_for_winner();
@@ -546,8 +668,8 @@ mod test {
     use game::consts::*;
     use game::ids::IdProducer;
     use game::location::TileSurface::*;
-    use game::location::{Coord, Location, Player, Region, Tile};
-    use game::unit::{description, Unit, UnitType};
+    use game::location::{Coord, Location, Player, Region, Tile, Unit, UnitType};
+    use game::unit::description;
 
     /// This function will create valid engine for testing with following structure:
     ///
@@ -684,8 +806,8 @@ mod test {
             .unwrap()
             .unit()
             .unwrap();
-        assert_eq!(unit.description().name, UnitType::Militia);
-        assert_eq!(unit.moves_left(), 0);
+        assert_eq!(unit.unit_type(), UnitType::Militia);
+        assert_eq!(game_engine.unit_info(unit.id()).moves_left(), 0);
     }
 
     #[test]
@@ -813,8 +935,7 @@ mod test {
                 .unwrap()
                 .unit()
                 .unwrap()
-                .description()
-                .name,
+                .unit_type(),
             UnitType::Militia
         );
         assert_ne!(old_goal_region_id, new_goal_region.id());
@@ -859,8 +980,7 @@ mod test {
                 .unwrap()
                 .unit()
                 .unwrap()
-                .description()
-                .name,
+                .unit_type(),
             UnitType::Knight
         );
         assert_ne!(old_goal_region_id, new_goal_region.id());
@@ -894,8 +1014,7 @@ mod test {
                 .unwrap()
                 .unit()
                 .unwrap()
-                .description()
-                .name,
+                .unit_type(),
             UnitType::Soldier
         );
         assert_eq!(old_goal_region_id, new_goal_region.id());

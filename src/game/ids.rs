@@ -3,7 +3,7 @@ pub type ID = u32;
 pub const NO_ID: ID = 0;
 
 /// Class that always returns unique id
-#[derive(Default)]
+#[derive(Eq, PartialEq, Debug, Default)]
 pub struct IdProducer {
     last_issued_id: ID,
 }

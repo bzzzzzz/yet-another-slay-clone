@@ -1,17 +1,6 @@
 use super::consts::*;
 use super::ids::ID;
-
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
-pub enum UnitType {
-    Grave,
-    Tree,
-    Village,
-    Tower,
-    GreatKnight,
-    Knight,
-    Soldier,
-    Militia,
-}
+use super::location::{Unit, UnitType};
 
 #[derive(Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub struct UnitDescription {
@@ -26,26 +15,27 @@ pub struct UnitDescription {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
-pub struct Unit {
-    id: ID,
+pub struct UnitInfo {
     description: &'static UnitDescription,
     moves_left: u32,
 }
 
-impl Unit {
-    pub fn new(id: ID, unit_type: UnitType) -> Self {
-        let description = description(unit_type);
+impl UnitInfo {
+    pub fn from(unit: Unit) -> Self {
+        let description = description(unit.unit_type());
         // Unit can move only on the next turn after its creation
         let moves_left = 0;
         Self {
             description,
             moves_left,
-            id,
         }
     }
 
-    pub fn id(&self) -> ID {
-        self.id
+    pub fn new(id: ID, unit_type: UnitType) -> (Unit, Self) {
+        let unit = Unit::new(id, unit_type);
+        let info = Self::from(unit);
+
+        (unit, info)
     }
 
     pub fn moves_left(&self) -> u32 {
@@ -61,9 +51,10 @@ impl Unit {
     /// # Examples:
     ///
     /// ```rust
-    /// use yasc::game::unit::{Unit,UnitType};
+    /// use yasc::game::unit::{UnitInfo};
+    /// use yasc::game::location::{UnitType};
     ///
-    /// let mut unit = Unit::new(1, UnitType::Soldier);
+    /// let (_, mut unit) = UnitInfo::new(1, UnitType::Soldier);
     /// unit.refill_moves();
     /// assert_eq!(unit.moves_left(), 5);
     /// unit.subtract_moves(3);
@@ -76,9 +67,10 @@ impl Unit {
     /// and will panic if you will try to subtract more moves than available at the moment:
     ///
     /// ```rust,should_panic
-    /// use yasc::game::unit::{Unit,UnitType};
+    /// use yasc::game::unit::{UnitInfo};
+    /// use yasc::game::location::{UnitType};
     ///
-    /// let mut unit = Unit::new(1, UnitType::GreatKnight);
+    /// let (_, mut unit) = UnitInfo::new(1, UnitType::GreatKnight);
     /// unit.refill_moves();
     /// assert_eq!(unit.moves_left(), 5);
     /// unit.subtract_moves(6);
@@ -96,9 +88,10 @@ impl Unit {
     /// # Examples:
     ///
     /// ```rust
-    /// use yasc::game::unit::{Unit,UnitType};
+    /// use yasc::game::unit::{UnitInfo};
+    /// use yasc::game::location::{UnitType};
     ///
-    /// let mut unit = Unit::new(1, UnitType::Soldier);
+    /// let (_, mut unit) = UnitInfo::new(1, UnitType::Soldier);
     /// assert_eq!(unit.moves_left(), 0);
     /// unit.refill_moves();
     /// assert_eq!(unit.moves_left(), 5);
@@ -107,25 +100,26 @@ impl Unit {
     pub fn refill_moves(&mut self) {
         self.moves_left = self.description.max_moves;
     }
+}
 
-    /// Return true if this unit can defeat unit provided as argument
-    ///
-    /// # Examples:
-    ///
-    /// ```rust
-    /// use yasc::game::unit::{Unit,UnitType};
-    ///
-    /// let soldier = Unit::new(1, UnitType::Soldier);
-    /// let knight = Unit::new(1, UnitType::Knight);
-    ///
-    /// assert_eq!(soldier.can_defeat(&knight), false);
-    /// assert_eq!(knight.can_defeat(&soldier), true);
-    /// assert_eq!(soldier.can_defeat(&soldier), false);
-    /// ```
-    ///
-    pub fn can_defeat(&self, other: &Unit) -> bool {
-        self.description.attack > other.description.defence
-    }
+/// Return true if this unit can defeat unit provided as argument
+///
+/// # Examples:
+///
+/// ```rust
+/// use yasc::game::unit::{can_defeat};
+/// use yasc::game::location::{Unit, UnitType};
+///
+/// let soldier = Unit::new(1, UnitType::Soldier);
+/// let knight = Unit::new(1, UnitType::Knight);
+///
+/// assert_eq!(can_defeat(soldier, knight), false);
+/// assert_eq!(can_defeat(knight, soldier), true);
+/// assert_eq!(can_defeat(soldier, soldier), false);
+/// ```
+///
+pub fn can_defeat(attacker: Unit, defender: Unit) -> bool {
+    description(attacker.unit_type()).attack > description(defender.unit_type()).defence
 }
 
 /// Return a description of unit identified by enum entry
@@ -133,7 +127,8 @@ impl Unit {
 /// # Examples:
 ///
 /// ```
-/// use yasc::game::unit::{description,UnitType};
+/// use yasc::game::unit::{description};
+/// use yasc::game::location::{UnitType};
 ///
 /// let desc = description(UnitType::Grave);
 /// assert_eq!(desc.name, UnitType::Grave);
@@ -154,35 +149,35 @@ pub fn description(unit_type: UnitType) -> &'static UnitDescription {
 
 #[cfg(test)]
 mod test {
-    use super::{description, Unit, UnitType};
+    use super::{can_defeat, description, Unit, UnitInfo, UnitType};
 
     #[test]
     fn unit_has_no_moves_when_created() {
-        let unit = Unit::new(1, UnitType::Soldier);
+        let (_, unit) = UnitInfo::new(1, UnitType::Soldier);
         assert_eq!(unit.moves_left(), 0);
-        let unit = Unit::new(1, UnitType::GreatKnight);
+        let (_, unit) = UnitInfo::new(1, UnitType::GreatKnight);
         assert_eq!(unit.moves_left(), 0);
-        let unit = Unit::new(1, UnitType::Village);
+        let (_, unit) = UnitInfo::new(1, UnitType::Village);
         assert_eq!(unit.moves_left(), 0);
     }
 
     #[test]
     fn unit_has_max_moves_when_refilled() {
-        let mut unit = Unit::new(1, UnitType::Soldier);
+        let (_, mut unit) = UnitInfo::new(1, UnitType::Soldier);
         unit.refill_moves();
         assert_eq!(unit.moves_left(), 5);
     }
 
     #[test]
     fn building_unit_always_has_zero_moves() {
-        let mut unit = Unit::new(1, UnitType::Tower);
+        let (_, mut unit) = UnitInfo::new(1, UnitType::Tower);
         unit.refill_moves();
         assert_eq!(unit.moves_left(), 0);
     }
 
     #[test]
     fn subtract_moves_changes_moves_left() {
-        let mut unit = Unit::new(1, UnitType::Soldier);
+        let (_, mut unit) = UnitInfo::new(1, UnitType::Soldier);
         unit.refill_moves();
         unit.subtract_moves(3);
         assert_eq!(unit.moves_left(), 2);
@@ -191,7 +186,7 @@ mod test {
     #[test]
     #[should_panic]
     fn subtract_moves_panics_when_no_moves_left() {
-        let mut unit = Unit::new(1, UnitType::Soldier);
+        let (_, mut unit) = UnitInfo::new(1, UnitType::Soldier);
         unit.refill_moves();
         unit.subtract_moves(6);
     }
@@ -200,21 +195,21 @@ mod test {
     fn can_defeat_when_unit_stronger() {
         let unit = Unit::new(1, UnitType::Soldier);
         let other = Unit::new(1, UnitType::Militia);
-        assert!(unit.can_defeat(&other));
+        assert!(can_defeat(unit, other));
     }
 
     #[test]
     fn can_defeat_when_unit_weaker() {
         let unit = Unit::new(1, UnitType::Soldier);
         let other = Unit::new(1, UnitType::GreatKnight);
-        assert!(!unit.can_defeat(&other));
+        assert!(!can_defeat(unit, other));
     }
 
     #[test]
     fn can_defeat_when_unit_equal() {
         let unit = Unit::new(1, UnitType::Soldier);
         let other = Unit::new(1, UnitType::Soldier);
-        assert!(!unit.can_defeat(&other));
+        assert!(!can_defeat(unit, other));
     }
 
     #[test]

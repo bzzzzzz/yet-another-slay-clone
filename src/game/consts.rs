@@ -1,5 +1,6 @@
 //! This module contains constants used for specifying game rules.
-use super::unit::{UnitDescription, UnitType};
+use super::location::UnitType;
+use super::unit::UnitDescription;
 
 pub const MIN_CONTROLLED_REGION_SIZE: usize = 2;
 

@@ -4,8 +4,7 @@ use std::iter::FromIterator;
 
 use super::consts::*;
 use super::ids::ID;
-use super::location::{Coord, Location, LocationValidationError, Player};
-use super::unit::UnitType;
+use super::location::{Coord, Location, LocationValidationError, Player, UnitType};
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub enum LocationRulesValidationError {
@@ -104,7 +103,7 @@ pub fn validate_location(location: &Location) -> Result<(), LocationRulesValidat
         for &coordinate in region.coordinates() {
             let tile = location.tile_at(coordinate).unwrap();
             if let Some(unit) = tile.unit() {
-                if unit.description().name == UnitType::Village {
+                if unit.unit_type() == UnitType::Village {
                     capitals += 1;
                 }
             }
@@ -162,8 +161,7 @@ mod test {
     use std::collections::{HashMap, HashSet};
 
     use game::location::TileSurface::*;
-    use game::location::{Coord, Location, Player, Region, Tile, TileSurface};
-    use game::unit::{Unit, UnitType};
+    use game::location::{Coord, Location, Player, Region, Tile, TileSurface, Unit, UnitType};
 
     use super::{
         validate_location, validate_regions, LocationRulesValidationError, RegionsValidationError,
