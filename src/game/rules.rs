@@ -1,5 +1,5 @@
 //! This module contains util functions and classes that help enforcing game rules
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::consts::*;
 use super::ids::ID;
@@ -123,6 +123,7 @@ pub fn validate_location(location: &Location) -> Result<(), LocationRulesValidat
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub enum RegionsValidationError {
     NoActiveRegions(ID),
+    UnlistedPlayer(ID),
 }
 
 /// Validate that each active player has at least one active region
@@ -146,9 +147,13 @@ pub fn validate_regions(
             return Err(RegionsValidationError::NoActiveRegions(player.id()));
         }
     }
+
+    let player_ids: HashSet<ID> = active_players.iter().map(|p| p.id()).collect();
     for (&id, &is_active) in player_is_active.iter() {
         if !is_active {
             return Err(RegionsValidationError::NoActiveRegions(id));
+        } else if !player_ids.contains(&id) {
+            return Err(RegionsValidationError::UnlistedPlayer(id));
         }
     }
     Ok(())
@@ -481,6 +486,32 @@ mod test {
         assert_eq!(
             res,
             Err(RegionsValidationError::NoActiveRegions(player_two.id()))
+        );
+    }
+
+    #[test]
+    fn validate_regions_error_unlisted_player() {
+        let map = test_map([Water, Water, Land, Land, Land, Water, Land]);
+
+        let mut coords_one = HashSet::default();
+        coords_one.insert(Coord::new(-1, 1));
+        coords_one.insert(Coord::new(0, 0));
+        let player_one = Player::new(21);
+        let region_one = Region::new(11, player_one, coords_one);
+
+        let mut coords_two = HashSet::default();
+        coords_two.insert(Coord::new(1, -1));
+        coords_two.insert(Coord::new(0, -1));
+        let player_two = Player::new(22);
+        let region_two = Region::new(12, player_two, coords_two);
+        let location = Location::new(map, vec![region_one, region_two]).unwrap();
+
+        let players = [player_one];
+        let res = validate_regions(&location, &players);
+
+        assert_eq!(
+            res,
+            Err(RegionsValidationError::UnlistedPlayer(player_two.id()))
         );
     }
 

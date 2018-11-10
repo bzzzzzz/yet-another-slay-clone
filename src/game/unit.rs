@@ -1,6 +1,6 @@
 use super::consts::*;
 use super::ids::ID;
-use super::location::{Unit, UnitType};
+use super::location::{Tile, Unit, UnitType};
 
 #[derive(Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub struct UnitDescription {
@@ -120,6 +120,11 @@ impl UnitInfo {
 ///
 pub fn can_defeat(attacker: Unit, defender: Unit) -> bool {
     description(attacker.unit_type()).attack > description(defender.unit_type()).defence
+}
+
+/// Return true if unit can step on the tile
+pub fn can_step_on(_unit: Unit, tile: &Tile) -> bool {
+    tile.surface().is_land()
 }
 
 /// Return a description of unit identified by enum entry
