@@ -5,4 +5,4 @@ authors = ["Evgeny Barbashov <evgeny.barbashov@gmail.com>"]
 license = "MIT"
 
 [dependencies]
-hex2d = "0.2.0"
+hex2d = { git = "https://github.com/dpc/hex2d-rs", rev = "e3d6d85"}

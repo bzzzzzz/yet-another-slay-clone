@@ -134,7 +134,15 @@ pub fn validate_regions(
     let mut player_is_active: HashMap<ID, bool> = HashMap::default();
 
     for region in location.regions().values() {
-        let is_active = region.coordinates().len() >= MIN_CONTROLLED_REGION_SIZE;
+        let mut is_active = region.coordinates().len() >= MIN_CONTROLLED_REGION_SIZE;
+        if !is_active {
+            let unit_count = region
+                .coordinates()
+                .iter()
+                .filter(|&c| location.tile_at(*c).unwrap().unit().is_some())
+                .count();
+            is_active = unit_count > 0;
+        }
         let region_id = region.owner().id();
         let current_active_status = *player_is_active.get(&region_id).unwrap_or(&false);
         player_is_active.insert(region_id, current_active_status || is_active);
@@ -150,9 +158,9 @@ pub fn validate_regions(
 
     let player_ids: HashSet<ID> = active_players.iter().map(|p| p.id()).collect();
     for (&id, &is_active) in player_is_active.iter() {
-        if !is_active {
+        if !is_active && player_ids.contains(&id) {
             return Err(RegionsValidationError::NoActiveRegions(id));
-        } else if !player_ids.contains(&id) {
+        } else if is_active && !player_ids.contains(&id) {
             return Err(RegionsValidationError::UnlistedPlayer(id));
         }
     }

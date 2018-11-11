@@ -4,6 +4,8 @@ use super::unit::UnitDescription;
 
 pub const MIN_CONTROLLED_REGION_SIZE: usize = 2;
 
+pub const EMPTY_TILE_DEFENCE: u8 = 0;
+
 pub const EMPTY_TILE_INCOME: i32 = 1;
 
 pub const CONTROLLED_REGION_STARTING_MONEY: i32 = 10;
