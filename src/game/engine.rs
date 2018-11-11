@@ -354,10 +354,10 @@ impl GameEngine {
         let (need_relocation, old_unit_to_remove) =
             self.prepare_buying_unit(player_id, originating_region_id, unit, dst)?;
 
+        self.location.place_unit(unit, dst)?;
         if need_relocation {
             self.add_tile_to_region(dst, originating_region_id)?;
         }
-        self.location.place_unit(unit, dst)?;
 
         if let Some(old_unit_id) = old_unit_to_remove {
             self.unit_info.remove(&old_unit_id);
@@ -620,10 +620,10 @@ impl GameEngine {
         let (unit_id, moves_num, region_id, need_relocation, old_unit_id_to_remove) =
             self.prepare_moving_unit(player_id, src, dst)?;
 
+        self.location.move_unit(src, dst)?;
         if need_relocation {
             self.add_tile_to_region(dst, region_id)?;
         }
-        self.location.move_unit(src, dst)?;
         self.unit_info
             .get_mut(&unit_id)
             .unwrap()
