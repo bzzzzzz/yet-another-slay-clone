@@ -48,7 +48,7 @@ pub const VILLAGE: UnitDescription = UnitDescription {
 pub const TOWER: UnitDescription = UnitDescription {
     name: UnitType::Tower,
     is_purchasable: true,
-    purchase_cost: 10,
+    purchase_cost: 15,
     turn_cost: 0,
     max_moves: 0,
     defence: 2,
@@ -59,7 +59,7 @@ pub const TOWER: UnitDescription = UnitDescription {
 pub const GREAT_KNIGHT: UnitDescription = UnitDescription {
     name: UnitType::GreatKnight,
     is_purchasable: true,
-    purchase_cost: 80,
+    purchase_cost: 40,
     turn_cost: 4,
     max_moves: 5,
     defence: 4,
@@ -70,7 +70,7 @@ pub const GREAT_KNIGHT: UnitDescription = UnitDescription {
 pub const KNIGHT: UnitDescription = UnitDescription {
     name: UnitType::Knight,
     is_purchasable: true,
-    purchase_cost: 40,
+    purchase_cost: 30,
     turn_cost: 3,
     max_moves: 5,
     defence: 3,

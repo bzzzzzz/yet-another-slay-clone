@@ -108,22 +108,19 @@ impl UnitInfo {
 ///
 /// ```rust
 /// use yasc::game::unit::{can_defeat};
-/// use yasc::game::location::{Unit, UnitType};
+/// use yasc::game::location::{UnitType};
 ///
-/// let soldier = Unit::new(1, UnitType::Soldier);
-/// let knight = Unit::new(1, UnitType::Knight);
-///
-/// assert_eq!(can_defeat(soldier, knight), false);
-/// assert_eq!(can_defeat(knight, soldier), true);
-/// assert_eq!(can_defeat(soldier, soldier), false);
+/// assert_eq!(can_defeat(UnitType::Soldier, UnitType::Knight), false);
+/// assert_eq!(can_defeat(UnitType::Knight, UnitType::Soldier), true);
+/// assert_eq!(can_defeat(UnitType::Soldier, UnitType::Soldier), false);
 /// ```
 ///
-pub fn can_defeat(attacker: Unit, defender: Unit) -> bool {
-    description(attacker.unit_type()).attack > description(defender.unit_type()).defence
+pub fn can_defeat(attacker: UnitType, defender: UnitType) -> bool {
+    description(attacker).attack > description(defender).defence
 }
 
 /// Return true if unit can step on the tile
-pub fn can_step_on(_unit: Unit, tile: &Tile) -> bool {
+pub fn can_step_on(_unit_type: UnitType, tile: &Tile) -> bool {
     tile.surface().is_land()
 }
 
@@ -154,7 +151,7 @@ pub fn description(unit_type: UnitType) -> &'static UnitDescription {
 
 #[cfg(test)]
 mod test {
-    use super::{can_defeat, description, Unit, UnitInfo, UnitType};
+    use super::{can_defeat, description, UnitInfo, UnitType};
 
     #[test]
     fn unit_has_no_moves_when_created() {
@@ -198,23 +195,17 @@ mod test {
 
     #[test]
     fn can_defeat_when_unit_stronger() {
-        let unit = Unit::new(1, UnitType::Soldier);
-        let other = Unit::new(1, UnitType::Militia);
-        assert!(can_defeat(unit, other));
+        assert!(can_defeat(UnitType::Soldier, UnitType::Militia));
     }
 
     #[test]
     fn can_defeat_when_unit_weaker() {
-        let unit = Unit::new(1, UnitType::Soldier);
-        let other = Unit::new(1, UnitType::GreatKnight);
-        assert!(!can_defeat(unit, other));
+        assert!(!can_defeat(UnitType::Soldier, UnitType::GreatKnight));
     }
 
     #[test]
     fn can_defeat_when_unit_equal() {
-        let unit = Unit::new(1, UnitType::Soldier);
-        let other = Unit::new(1, UnitType::Soldier);
-        assert!(!can_defeat(unit, other));
+        assert!(!can_defeat(UnitType::Soldier, UnitType::Soldier));
     }
 
     #[test]

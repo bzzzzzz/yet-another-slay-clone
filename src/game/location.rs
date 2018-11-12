@@ -321,12 +321,16 @@ impl Location {
     /// location borders
     ///
     /// If this method returns any kind of error, no changes to locations were made
-    pub fn remove_unit(&mut self, coordinate: Coord) -> Result<(), LocationModificationError> {
-        self.map
+    pub fn remove_unit(
+        &mut self,
+        coordinate: Coord,
+    ) -> Result<Option<Unit>, LocationModificationError> {
+        let unit = self
+            .map
             .get_mut(&coordinate)
             .ok_or_else(|| LocationModificationError::CoordinateOutOfLocation(coordinate))?
             .take_unit();
-        Ok(())
+        Ok(unit)
     }
 
     /// Places a provided unit on a tile with specified coordinate. If that tile already has
