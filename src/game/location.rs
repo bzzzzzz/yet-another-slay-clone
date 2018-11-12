@@ -9,7 +9,8 @@ pub type Coord = Coordinate<i32>;
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub enum UnitType {
     Grave,
-    Tree,
+    PineTree,
+    PalmTree,
     Village,
     Tower,
     GreatKnight,

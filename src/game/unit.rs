@@ -5,12 +5,14 @@ use super::location::{Tile, Unit, UnitType};
 #[derive(Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub struct UnitDescription {
     pub name: UnitType,
+    pub is_replaceable: bool,
     pub is_purchasable: bool,
     pub purchase_cost: i32,
     pub turn_cost: i32,
     pub max_moves: u32,
     pub defence: u8,
     pub attack: u8,
+    pub upgrade_levels: u8,
     pub upgrades_to: Option<&'static UnitDescription>,
 }
 
@@ -51,14 +53,14 @@ impl UnitInfo {
     /// # Examples:
     ///
     /// ```rust
-    /// use yasc::game::unit::{UnitInfo};
     /// use yasc::game::location::{UnitType};
+    /// use yasc::game::unit::{UnitInfo};
     ///
     /// let (_, mut unit) = UnitInfo::new(1, UnitType::Soldier);
     /// unit.refill_moves();
-    /// assert_eq!(unit.moves_left(), 5);
+    /// assert_eq!(unit.moves_left(), 4);
     /// unit.subtract_moves(3);
-    /// assert_eq!(unit.moves_left(), 2);
+    /// assert_eq!(unit.moves_left(), 1);
     /// ```
     ///
     /// # Panics:
@@ -67,12 +69,12 @@ impl UnitInfo {
     /// and will panic if you will try to subtract more moves than available at the moment:
     ///
     /// ```rust,should_panic
-    /// use yasc::game::unit::{UnitInfo};
     /// use yasc::game::location::{UnitType};
+    /// use yasc::game::unit::{UnitInfo};
     ///
     /// let (_, mut unit) = UnitInfo::new(1, UnitType::GreatKnight);
     /// unit.refill_moves();
-    /// assert_eq!(unit.moves_left(), 5);
+    /// assert_eq!(unit.moves_left(), 4);
     /// unit.subtract_moves(6);
     /// ```
     ///
@@ -88,13 +90,13 @@ impl UnitInfo {
     /// # Examples:
     ///
     /// ```rust
-    /// use yasc::game::unit::{UnitInfo};
     /// use yasc::game::location::{UnitType};
+    /// use yasc::game::unit::{UnitInfo};
     ///
     /// let (_, mut unit) = UnitInfo::new(1, UnitType::Soldier);
     /// assert_eq!(unit.moves_left(), 0);
     /// unit.refill_moves();
-    /// assert_eq!(unit.moves_left(), 5);
+    /// assert_eq!(unit.moves_left(), 4);
     /// ```
     ///
     pub fn refill_moves(&mut self) {
@@ -124,6 +126,43 @@ pub fn can_step_on(_unit_type: UnitType, tile: &Tile) -> bool {
     tile.surface().is_land()
 }
 
+/// Return a possible result of merging actor into goal (or replacing goal with actor)
+/// If merge is impossible for any reason, return `None`
+///
+/// # Examples:
+///
+/// ```rust
+/// use yasc::game::unit::{merge_result};
+/// use yasc::game::location::{UnitType};
+///
+/// assert_eq!(merge_result(UnitType::Soldier, UnitType::Village), None);
+/// assert_eq!(merge_result(UnitType::Soldier, UnitType::Militia), Some(UnitType::Knight));
+/// assert_eq!(merge_result(UnitType::Militia, UnitType::Grave), Some(UnitType::Militia));
+/// assert_eq!(merge_result(UnitType::Soldier, UnitType::Soldier), Some(UnitType::GreatKnight));
+/// assert_eq!(merge_result(UnitType::Soldier, UnitType::Knight), None);
+/// assert_eq!(merge_result(UnitType::Grave, UnitType::Militia), None);
+/// ```
+pub fn merge_result(actor: UnitType, goal: UnitType) -> Option<UnitType> {
+    let goal_description = description(goal);
+
+    if goal_description.is_replaceable {
+        Some(actor)
+    } else if goal_description.upgrades_to.is_some() {
+        let actor_description = description(actor);
+        if actor_description.upgrade_levels == 0 {
+            None
+        } else {
+            let mut result = Some(goal_description);
+            for _ in 0..actor_description.upgrade_levels {
+                result = result.and_then(|r| r.upgrades_to)
+            }
+            result.map(|d| d.name)
+        }
+    } else {
+        None
+    }
+}
+
 /// Return a description of unit identified by enum entry
 ///
 /// # Examples:
@@ -139,7 +178,8 @@ pub fn can_step_on(_unit_type: UnitType, tile: &Tile) -> bool {
 pub fn description(unit_type: UnitType) -> &'static UnitDescription {
     match unit_type {
         UnitType::Grave => &GRAVE,
-        UnitType::Tree => &TREE,
+        UnitType::PineTree => &PINE_TREE,
+        UnitType::PalmTree => &PALM_TREE,
         UnitType::Village => &VILLAGE,
         UnitType::Tower => &TOWER,
         UnitType::GreatKnight => &GREAT_KNIGHT,
@@ -151,6 +191,7 @@ pub fn description(unit_type: UnitType) -> &'static UnitDescription {
 
 #[cfg(test)]
 mod test {
+    use super::super::consts::*;
     use super::{can_defeat, description, UnitInfo, UnitType};
 
     #[test]
@@ -167,7 +208,7 @@ mod test {
     fn unit_has_max_moves_when_refilled() {
         let (_, mut unit) = UnitInfo::new(1, UnitType::Soldier);
         unit.refill_moves();
-        assert_eq!(unit.moves_left(), 5);
+        assert_eq!(unit.moves_left(), STANDARD_MOVES_NUM);
     }
 
     #[test]
@@ -182,7 +223,7 @@ mod test {
         let (_, mut unit) = UnitInfo::new(1, UnitType::Soldier);
         unit.refill_moves();
         unit.subtract_moves(3);
-        assert_eq!(unit.moves_left(), 2);
+        assert_eq!(unit.moves_left(), STANDARD_MOVES_NUM - 3);
     }
 
     #[test]
@@ -190,7 +231,7 @@ mod test {
     fn subtract_moves_panics_when_no_moves_left() {
         let (_, mut unit) = UnitInfo::new(1, UnitType::Soldier);
         unit.refill_moves();
-        unit.subtract_moves(6);
+        unit.subtract_moves(STANDARD_MOVES_NUM + 1);
     }
 
     #[test]

@@ -10,7 +10,7 @@ use super::location::{
 use super::rules::{
     validate_location, validate_regions, LocationRulesValidationError, RegionsValidationError,
 };
-use super::unit::{can_defeat, can_step_on, description, UnitInfo};
+use super::unit::{can_defeat, can_step_on, description, merge_result, UnitInfo};
 
 /// An error that can be returned as a result of game engine self validation process.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
@@ -54,6 +54,7 @@ pub enum PlayerActionError {
     NotEnoughMoney(ID),
     NotEnoughMoves(u32, u32),
     NotOwned(Coord),
+    CannotBePlacedByPlayer(UnitType),
     NoUnit(Coord),
     NoUpgrade(UnitType),
     GameAlreadyFinished,
@@ -330,14 +331,13 @@ impl GameEngine {
     }
 
     /// Check and prepare everything required for placing a unit on a new coordinate
-    /// Returns a tuple with
     fn prepare_placing_unit(
         &self,
         player_id: ID,
         originating_region_id: ID,
         unit_type: UnitType,
         dst: Coord,
-    ) -> Result<(bool, Option<ID>), PlayerActionError> {
+    ) -> Result<(bool, Option<ID>, Option<UnitType>), PlayerActionError> {
         if !self.unit_can_step_on_coord(unit_type, dst, originating_region_id, true) {
             return Err(PlayerActionError::InaccessibleLocation(dst));
         }
@@ -345,13 +345,18 @@ impl GameEngine {
         let need_relocation = dst_region.id() != originating_region_id;
 
         let tile = self.location.tile_at(dst).unwrap();
+        let mut upgrade_to: Option<UnitType> = None;
         let old_unit_to_remove = if let Some(current_unit) = tile.unit() {
             // We cannot replace unit of the same owner
             if dst_region.owner().id() == player_id {
-                return Err(PlayerActionError::AlreadyOccupied(dst));
-            }
-            // But we can replace other player's unit if we defeat it
-            if !can_defeat(unit_type, current_unit.unit_type()) {
+                let possible_merge_result = merge_result(unit_type, current_unit.unit_type());
+                if possible_merge_result.is_none() {
+                    return Err(PlayerActionError::AlreadyOccupied(dst));
+                }
+                if possible_merge_result.unwrap() != unit_type {
+                    upgrade_to = possible_merge_result;
+                }
+            } else if !can_defeat(unit_type, current_unit.unit_type()) {
                 return Err(PlayerActionError::CannotAttack(dst));
             }
 
@@ -360,7 +365,7 @@ impl GameEngine {
             None
         };
 
-        Ok((need_relocation, old_unit_to_remove))
+        Ok((need_relocation, old_unit_to_remove, upgrade_to))
     }
 
     fn prepare_buying_unit(
@@ -370,11 +375,19 @@ impl GameEngine {
         unit_type: UnitType,
         dst: Coord,
     ) -> Result<(bool, Option<ID>), PlayerActionError> {
-        let (need_relocation, old_unit_to_remove) =
+        let unit_description = description(unit_type);
+        if !unit_description.is_purchasable {
+            return Err(PlayerActionError::CannotBePlacedByPlayer(unit_type));
+        }
+        let (need_relocation, old_unit_to_remove, upgrade_to) =
             self.prepare_placing_unit(player_id, originating_region_id, unit_type, dst)?;
 
+        // You cannot place unit to merge it
+        if upgrade_to.is_some() {
+            return Err(PlayerActionError::InaccessibleLocation(dst));
+        }
         let region_info = self.region_info[&originating_region_id];
-        if !region_info.can_afford(description(unit_type).purchase_cost) {
+        if !region_info.can_afford(unit_description.purchase_cost) {
             return Err(PlayerActionError::NotEnoughMoney(originating_region_id));
         }
 
@@ -473,11 +486,11 @@ impl GameEngine {
         }
     }
 
-    fn maybe_remove_unit(&mut self, coordinate: Coord) -> Option<Unit> {
+    fn maybe_remove_unit(&mut self, coordinate: Coord) -> Option<(Unit, UnitInfo)> {
         let unit = self.location.remove_unit(coordinate).unwrap()?;
-        self.unit_info.remove(&unit.id());
+        let info = self.unit_info.remove(&unit.id()).unwrap();
 
-        Some(unit)
+        Some((unit, info))
     }
 
     fn create_and_place_unit(
@@ -582,7 +595,9 @@ impl GameEngine {
         let dst_region = self.region_at(coordinate).unwrap();
 
         if dst_region.id() == original_region_id {
-            return !is_last_step || tile.unit().is_none();
+            return !is_last_step
+                || tile.unit().is_none()
+                || merge_result(unit_type, tile.unit().unwrap().unit_type()).is_some();
         }
         if !is_last_step {
             return false;
@@ -619,7 +634,7 @@ impl GameEngine {
         player_id: ID,
         src: Coord,
         dst: Coord,
-    ) -> Result<(ID, u32, ID, bool, Option<ID>), PlayerActionError> {
+    ) -> Result<(ID, u32, ID, bool, Option<ID>, Option<UnitType>), PlayerActionError> {
         let unit = self
             .location
             .tile_at(src)
@@ -634,7 +649,7 @@ impl GameEngine {
         }
         let unit = unit.unwrap();
 
-        let (need_relocation, old_unit_id_to_remove) =
+        let (need_relocation, old_unit_id_to_remove, upgrade_to) =
             self.prepare_placing_unit(player_id, region.id(), unit.unit_type(), dst)?;
 
         let distance = self.location.bfs_distance(src, dst, |c| {
@@ -649,7 +664,7 @@ impl GameEngine {
                 distance.unwrap(),
             ));
         }
-        let moves_to_subtract = if need_relocation {
+        let moves_to_subtract = if need_relocation || old_unit_id_to_remove.is_some() {
             unit_info.moves_left()
         } else {
             distance.unwrap()
@@ -661,6 +676,7 @@ impl GameEngine {
             region.id(),
             need_relocation,
             old_unit_id_to_remove,
+            upgrade_to,
         ))
     }
 
@@ -670,7 +686,7 @@ impl GameEngine {
         src: Coord,
         dst: Coord,
     ) -> Result<(), PlayerActionError> {
-        let (unit_id, moves_num, region_id, need_relocation, old_unit_id_to_remove) =
+        let (unit_id, moves_num, region_id, need_relocation, old_unit_id_to_remove, upgrade_to) =
             self.prepare_moving_unit(player_id, src, dst)?;
 
         self.location.move_unit(src, dst)?;
@@ -683,6 +699,10 @@ impl GameEngine {
             .subtract_moves(moves_num);
         if let Some(old_unit_id) = old_unit_id_to_remove {
             self.unit_info.remove(&old_unit_id);
+        }
+        if let Some(unit_type) = upgrade_to {
+            self.maybe_remove_unit(dst).unwrap();
+            self.create_and_place_unit(unit_type, dst).unwrap();
         }
 
         Ok(())
@@ -830,8 +850,9 @@ impl GameEngine {
             .location
             .map()
             .iter()
-            .filter(|(_, t)| t.unit().is_some() && t.unit().unwrap().unit_type() == UnitType::Tree)
-            .flat_map(|(&c, _)| {
+            .filter(|(_, t)| {
+                t.unit().is_some() && t.unit().unwrap().unit_type() == UnitType::PineTree
+            }).flat_map(|(&c, _)| {
                 let n = c.neighbors();
                 let mut m = Vec::new();
                 m.extend(n.iter());
@@ -844,7 +865,7 @@ impl GameEngine {
             .filter(|c| self.location.tile_at(*c).unwrap().unit().is_none())
             .collect();
         for coordinate in coordinates_to_add_forest.into_iter() {
-            self.create_and_place_unit(UnitType::Tree, coordinate)
+            self.create_and_place_unit(UnitType::PineTree, coordinate)
                 .unwrap();
         }
     }
@@ -1079,9 +1100,27 @@ mod test {
     }
 
     #[test]
+    fn place_new_unit_simple_tile_not_placeable() {
+        let (pl, ri, mut game_engine) = create_valid_engine();
+        let coordinate = Coord::new(2, -1);
+
+        let action = PlayerAction::PlaceNewUnit(ri[0], UnitType::Grave, coordinate);
+        let res = game_engine.act(pl[0].id(), action);
+
+        assert_eq!(
+            res,
+            Err(PlayerActionError::CannotBePlacedByPlayer(UnitType::Grave))
+        );
+        assert_eq!(
+            game_engine.region_money(ri[0]),
+            Some(CONTROLLED_REGION_STARTING_MONEY)
+        );
+    }
+
+    #[test]
     fn place_new_unit_simple_tile_has_other_unit() {
         let (pl, ri, mut game_engine) = create_valid_engine();
-        let coordinate = Coord::new(1, 0);
+        let coordinate = Coord::new(1, -1);
 
         let action = PlayerAction::PlaceNewUnit(ri[0], UnitType::Militia, coordinate);
         let res = game_engine.act(pl[0].id(), action);
@@ -1273,7 +1312,7 @@ mod test {
             assert_eq!(info.moves_left(), info.description().max_moves - 1);
         }
 
-        // And one more
+        // And one more, so we have no more moves after
         let (src, dst) = (Coord::new(2, -1), Coord::new(0, -1));
         let action = PlayerAction::MoveUnit { src, dst };
         let res = game_engine.act(pl[0].id(), action);
@@ -1288,33 +1327,18 @@ mod test {
             assert_eq!(info.moves_left(), info.description().max_moves - 3);
         }
 
-        // And back, so we have no more moves after
+        // And now we will get error, because there are no moves left
         let (src, dst) = (Coord::new(0, -1), Coord::new(1, 0));
         let action = PlayerAction::MoveUnit { src, dst };
         let res = game_engine.act(pl[0].id(), action);
 
-        assert_eq!(res, Ok(()));
-        assert_eq!(game_engine.location().tile_at(src).unwrap().unit(), None);
-
-        {
-            let unit = game_engine.location().tile_at(dst).unwrap().unit().unwrap();
-            let info = game_engine.unit_info(unit.id());
-            assert_eq!(unit.unit_type(), UnitType::Soldier);
-            assert_eq!(info.moves_left(), 0);
-        }
-
-        // And now we will get error, because there are no moves left
-        let (src, dst) = (Coord::new(1, 0), Coord::new(2, -1));
-        let action = PlayerAction::MoveUnit { src, dst };
-        let res = game_engine.act(pl[0].id(), action);
-
-        assert_eq!(res, Err(PlayerActionError::NotEnoughMoves(0, 1)));
+        assert_eq!(res, Err(PlayerActionError::NotEnoughMoves(1, 2)));
         assert_eq!(game_engine.location().tile_at(dst).unwrap().unit(), None);
 
         let unit = game_engine.location().tile_at(src).unwrap().unit().unwrap();
         let info = game_engine.unit_info(unit.id());
         assert_eq!(unit.unit_type(), UnitType::Soldier);
-        assert_eq!(info.moves_left(), 0);
+        assert_eq!(info.moves_left(), 1);
     }
 
     #[test]
@@ -1482,6 +1506,91 @@ mod test {
     }
 
     #[test]
+    fn move_unit_and_merge_all_ok() {
+        let (pl, _, mut game_engine) = create_valid_engine();
+        let dst = Coord::new(2, -1);
+        game_engine
+            .create_and_place_unit(UnitType::Militia, dst)
+            .unwrap();
+
+        let src = Coord::new(1, 0);
+        let action = PlayerAction::MoveUnit { src, dst };
+        let res = game_engine.act(pl[0].id(), action);
+
+        assert_eq!(res, Ok(()));
+
+        let unit = game_engine.location().tile_at(dst).unwrap().unit().unwrap();
+        let info = game_engine.unit_info(unit.id());
+        assert_eq!(unit.unit_type(), UnitType::Knight);
+        assert_eq!(info.moves_left(), 0);
+    }
+
+    #[test]
+    fn move_unit_and_merge_no_result_error() {
+        let (pl, _, mut game_engine) = create_valid_engine();
+        let dst = Coord::new(2, -1);
+        game_engine
+            .create_and_place_unit(UnitType::Knight, dst)
+            .unwrap();
+
+        let src = Coord::new(1, 0);
+        let action = PlayerAction::MoveUnit { src, dst };
+        let res = game_engine.act(pl[0].id(), action);
+
+        assert_eq!(res, Err(PlayerActionError::InaccessibleLocation(dst)));
+
+        let unit = game_engine.location().tile_at(dst).unwrap().unit().unwrap();
+        let info = game_engine.unit_info(unit.id());
+        assert_eq!(unit.unit_type(), UnitType::Knight);
+        assert_eq!(info.moves_left(), 0);
+
+        let unit = game_engine.location().tile_at(src).unwrap().unit().unwrap();
+        let info = game_engine.unit_info(unit.id());
+        assert_eq!(unit.unit_type(), UnitType::Soldier);
+        assert_eq!(info.moves_left(), STANDARD_MOVES_NUM);
+    }
+
+    #[test]
+    fn move_unit_on_grave() {
+        let (pl, _, mut game_engine) = create_valid_engine();
+        let dst = Coord::new(2, -1);
+        game_engine
+            .create_and_place_unit(UnitType::Grave, dst)
+            .unwrap();
+
+        let src = Coord::new(1, 0);
+        let action = PlayerAction::MoveUnit { src, dst };
+        let res = game_engine.act(pl[0].id(), action);
+
+        assert_eq!(res, Ok(()));
+
+        let unit = game_engine.location().tile_at(dst).unwrap().unit().unwrap();
+        let info = game_engine.unit_info(unit.id());
+        assert_eq!(unit.unit_type(), UnitType::Soldier);
+        assert_eq!(info.moves_left(), 0);
+    }
+
+    #[test]
+    fn move_unit_on_tree() {
+        let (pl, _, mut game_engine) = create_valid_engine();
+        let dst = Coord::new(2, -1);
+        game_engine
+            .create_and_place_unit(UnitType::PineTree, dst)
+            .unwrap();
+
+        let src = Coord::new(1, 0);
+        let action = PlayerAction::MoveUnit { src, dst };
+        let res = game_engine.act(pl[0].id(), action);
+
+        assert_eq!(res, Ok(()));
+
+        let unit = game_engine.location().tile_at(dst).unwrap().unit().unwrap();
+        let info = game_engine.unit_info(unit.id());
+        assert_eq!(unit.unit_type(), UnitType::Soldier);
+        assert_eq!(info.moves_left(), 0);
+    }
+
+    #[test]
     fn end_players_turn_changes_player() {
         let (pl, _, mut game_engine) = create_valid_engine();
         let action = PlayerAction::EndTurn;
@@ -1531,16 +1640,38 @@ mod test {
         assert_eq!(*game_engine.active_player(), pl[0]);
 
         // TODO: check that all post-turn things worked correctly
+        unimplemented!()
     }
 
     #[test]
-    fn end_turn_makes_active_player_inactive_if_nothing_left() {}
+    fn end_turn_makes_active_player_inactive_if_nothing_left() {
+        unimplemented!()
+    }
 
     #[test]
-    fn end_turn_skips_first_player_if_he_is_inactive() {}
+    fn end_turn_skips_first_player_if_he_is_inactive() {
+        unimplemented!()
+    }
 
     #[test]
-    fn end_turn_selects_winner_if_any() {}
+    fn end_turn_selects_winner_if_any() {
+        unimplemented!()
+    }
+
+    #[test]
+    fn end_turn_spawns_graves_if_units_die_from_starvation() {
+        unimplemented!()
+    }
+
+    #[test]
+    fn end_turn_spawns_trees_on_top_of_graves() {
+        unimplemented!()
+    }
+
+    #[test]
+    fn end_turn_spreads_trees() {
+        unimplemented!()
+    }
 
     #[test]
     fn upgrade_unit_all_ok() {
