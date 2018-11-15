@@ -53,8 +53,7 @@ impl UnitInfo {
     /// # Examples:
     ///
     /// ```rust
-    /// use yasc::game::location::{UnitType};
-    /// use yasc::game::unit::{UnitInfo};
+    /// use yasc::game::{UnitType, UnitInfo};
     ///
     /// let (_, mut unit) = UnitInfo::new(1, UnitType::Soldier);
     /// unit.refill_moves();
@@ -69,8 +68,7 @@ impl UnitInfo {
     /// and will panic if you will try to subtract more moves than available at the moment:
     ///
     /// ```rust,should_panic
-    /// use yasc::game::location::{UnitType};
-    /// use yasc::game::unit::{UnitInfo};
+    /// use yasc::game::{UnitType, UnitInfo};
     ///
     /// let (_, mut unit) = UnitInfo::new(1, UnitType::GreatKnight);
     /// unit.refill_moves();
@@ -90,8 +88,7 @@ impl UnitInfo {
     /// # Examples:
     ///
     /// ```rust
-    /// use yasc::game::location::{UnitType};
-    /// use yasc::game::unit::{UnitInfo};
+    /// use yasc::game::{UnitType, UnitInfo};
     ///
     /// let (_, mut unit) = UnitInfo::new(1, UnitType::Soldier);
     /// assert_eq!(unit.moves_left(), 0);
@@ -105,18 +102,6 @@ impl UnitInfo {
 }
 
 /// Return true if this unit can defeat unit provided as argument
-///
-/// # Examples:
-///
-/// ```rust
-/// use yasc::game::unit::{can_defeat};
-/// use yasc::game::location::{UnitType};
-///
-/// assert_eq!(can_defeat(UnitType::Soldier, UnitType::Knight), false);
-/// assert_eq!(can_defeat(UnitType::Knight, UnitType::Soldier), true);
-/// assert_eq!(can_defeat(UnitType::Soldier, UnitType::Soldier), false);
-/// ```
-///
 pub fn can_defeat(attacker: UnitType, defender: UnitType) -> bool {
     description(attacker).attack > description(defender).defence
 }
@@ -128,20 +113,6 @@ pub fn can_step_on(_unit_type: UnitType, tile: &Tile) -> bool {
 
 /// Return a possible result of merging actor into goal (or replacing goal with actor)
 /// If merge is impossible for any reason, return `None`
-///
-/// # Examples:
-///
-/// ```rust
-/// use yasc::game::unit::{merge_result};
-/// use yasc::game::location::{UnitType};
-///
-/// assert_eq!(merge_result(UnitType::Soldier, UnitType::Village), None);
-/// assert_eq!(merge_result(UnitType::Soldier, UnitType::Militia), Some(UnitType::Knight));
-/// assert_eq!(merge_result(UnitType::Militia, UnitType::Grave), Some(UnitType::Militia));
-/// assert_eq!(merge_result(UnitType::Soldier, UnitType::Soldier), Some(UnitType::GreatKnight));
-/// assert_eq!(merge_result(UnitType::Soldier, UnitType::Knight), None);
-/// assert_eq!(merge_result(UnitType::Grave, UnitType::Militia), None);
-/// ```
 pub fn merge_result(actor: UnitType, goal: UnitType) -> Option<UnitType> {
     let goal_description = description(goal);
 
@@ -164,17 +135,6 @@ pub fn merge_result(actor: UnitType, goal: UnitType) -> Option<UnitType> {
 }
 
 /// Return a description of unit identified by enum entry
-///
-/// # Examples:
-///
-/// ```
-/// use yasc::game::unit::{description};
-/// use yasc::game::location::{UnitType};
-///
-/// let desc = description(UnitType::Grave);
-/// assert_eq!(desc.name, UnitType::Grave);
-/// ```
-///
 pub fn description(unit_type: UnitType) -> &'static UnitDescription {
     match unit_type {
         UnitType::Grave => &GRAVE,
@@ -192,7 +152,39 @@ pub fn description(unit_type: UnitType) -> &'static UnitDescription {
 #[cfg(test)]
 mod test {
     use super::super::consts::*;
-    use super::{can_defeat, description, UnitInfo, UnitType};
+    use super::{can_defeat, description, merge_result, UnitInfo, UnitType};
+
+    #[test]
+    fn check_description() {
+        let desc = description(UnitType::Grave);
+        assert_eq!(desc.name, UnitType::Grave);
+    }
+
+    #[test]
+    fn merge_result_check() {
+        assert_eq!(merge_result(UnitType::Soldier, UnitType::Village), None);
+        assert_eq!(
+            merge_result(UnitType::Soldier, UnitType::Militia),
+            Some(UnitType::Knight)
+        );
+        assert_eq!(
+            merge_result(UnitType::Militia, UnitType::Grave),
+            Some(UnitType::Militia)
+        );
+        assert_eq!(
+            merge_result(UnitType::Soldier, UnitType::Soldier),
+            Some(UnitType::GreatKnight)
+        );
+        assert_eq!(merge_result(UnitType::Soldier, UnitType::Knight), None);
+        assert_eq!(merge_result(UnitType::Grave, UnitType::Militia), None);
+    }
+
+    #[test]
+    fn check_can_defeat() {
+        assert_eq!(can_defeat(UnitType::Soldier, UnitType::Knight), false);
+        assert_eq!(can_defeat(UnitType::Knight, UnitType::Soldier), true);
+        assert_eq!(can_defeat(UnitType::Soldier, UnitType::Soldier), false);
+    }
 
     #[test]
     fn unit_has_no_moves_when_created() {

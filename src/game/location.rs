@@ -51,7 +51,7 @@ impl TileSurface {
     /// # Examples
     ///
     /// ```
-    /// use yasc::game::location::TileSurface;
+    /// use yasc::game::TileSurface;
     ///
     /// assert_eq!(TileSurface::Water.is_land(), false);
     /// assert_eq!(TileSurface::Land.is_land(), true);
@@ -66,7 +66,7 @@ impl TileSurface {
     /// # Examples
     ///
     /// ```
-    /// use yasc::game::location::TileSurface;
+    /// use yasc::game::TileSurface;
     ///
     /// assert_eq!(TileSurface::Water.is_water(), true);
     /// assert_eq!(TileSurface::Land.is_water(), false);

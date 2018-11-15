@@ -1,6 +1,13 @@
 mod consts;
-pub mod engine;
+mod engine;
 mod ids;
-pub mod location;
+mod location;
 mod rules;
-pub mod unit;
+mod unit;
+
+pub use self::engine::{EngineValidationError, GameEngine, PlayerAction, PlayerActionError};
+pub use self::location::{
+    Coord, Location, LocationModificationError, LocationValidationError, Player, Region, Tile,
+    TileSurface, Unit, UnitType,
+};
+pub use self::unit::{UnitDescription, UnitInfo};
