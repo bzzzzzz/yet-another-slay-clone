@@ -223,6 +223,10 @@ impl GameEngine {
         self.current_turn
     }
 
+    pub fn winner(&self) -> Option<ID> {
+        self.winner
+    }
+
     pub fn region_money(&self, region_id: ID) -> Option<i32> {
         self.region_info.get(&region_id).map(|ri| ri.money_balance)
     }
@@ -497,11 +501,13 @@ impl GameEngine {
         &mut self,
         unit_type: UnitType,
         coordinate: Coord,
-    ) -> Result<(), LocationModificationError> {
+    ) -> Result<ID, LocationModificationError> {
         let (unit, info) = UnitInfo::new(self.id_producer.next(), unit_type);
         self.unit_info.insert(unit.id(), info);
 
-        self.location.place_unit(unit, coordinate)
+        self.location.place_unit(unit, coordinate)?;
+
+        Ok(unit.id())
     }
 
     fn fix_capital(&mut self, region_id: ID) {
@@ -539,6 +545,7 @@ impl GameEngine {
                 .unwrap();
             self.maybe_remove_unit(c).unwrap();
         } else if capitals.is_empty() {
+            // TODO: now capital to create is somehow random. We need to make selection predictable one day
             let coord = self
                 .location
                 .regions()
@@ -563,11 +570,15 @@ impl GameEngine {
                     |(c, _)| *c,
                 );
 
+            self.maybe_remove_unit(coord);
             self.create_and_place_unit(UnitType::Village, coord)
                 .unwrap();
         } else if capitals.len() > 1 {
-            let c = capitals[0];
-            self.maybe_remove_unit(c).unwrap();
+            // TODO: now capital to keep is somehow random. We need to make selection predictable one day
+            // The best way is to keep a capital of biggest and richest region.
+            for &c in capitals.iter().skip(1) {
+                self.maybe_remove_unit(c).unwrap();
+            }
         }
     }
 
@@ -697,12 +708,18 @@ impl GameEngine {
             .get_mut(&unit_id)
             .unwrap()
             .subtract_moves(moves_num);
-        if let Some(old_unit_id) = old_unit_id_to_remove {
-            self.unit_info.remove(&old_unit_id);
-        }
+        let old_unit_info = if let Some(old_unit_id) = old_unit_id_to_remove {
+            self.unit_info.remove(&old_unit_id)
+        } else {
+            None
+        };
         if let Some(unit_type) = upgrade_to {
             self.maybe_remove_unit(dst).unwrap();
-            self.create_and_place_unit(unit_type, dst).unwrap();
+            let unit_id = self.create_and_place_unit(unit_type, dst).unwrap();
+            let old_info = old_unit_info.unwrap();
+            if old_info.moves_left() == old_info.description().max_moves {
+                self.unit_info.get_mut(&unit_id).unwrap().refill_moves();
+            }
         }
 
         Ok(())
@@ -797,18 +814,20 @@ impl GameEngine {
         }
     }
 
-    fn remove_graves(&mut self) {
-        let mut to_delete = Vec::new();
+    fn replace_graves_with_pine_trees(&mut self) {
+        let mut existing_graves = Vec::new();
         for (&coord, tile) in self.location.map().iter() {
             if tile
                 .unit()
                 .map_or(false, |u| u.unit_type() == UnitType::Grave)
             {
-                to_delete.push(coord);
+                existing_graves.push(coord);
             }
         }
-        for coordinate in to_delete.into_iter() {
+        for coordinate in existing_graves.into_iter() {
             self.maybe_remove_unit(coordinate).unwrap();
+            self.create_and_place_unit(UnitType::PineTree, coordinate)
+                .unwrap();
         }
     }
 
@@ -836,47 +855,81 @@ impl GameEngine {
             .iter()
             .filter_map(|id| self.location.regions().get(id))
             .flat_map(Region::coordinates)
-            .filter(|&c| self.location.tile_at(*c).unwrap().unit().is_some())
-            .cloned()
+            .filter_map(|&c| self.location.tile_at(c).unwrap().unit().map(|u| (c, u)))
+            .filter(|(_, u)| {
+                let d = description(u.unit_type());
+                // We don't kill units that are not owned by player and the ones that have no turn cost
+                !d.is_unownable && d.turn_cost > 0
+            }).map(|(c, _)| c)
             .collect();
         for coordinate in kill_coordinates.into_iter() {
+            self.maybe_remove_unit(coordinate).unwrap();
             self.create_and_place_unit(UnitType::Grave, coordinate)
                 .unwrap();
         }
     }
 
-    fn spread_forests(&mut self) {
-        let coordinates_to_maybe_add_forest: HashSet<Coord> = self
-            .location
-            .map()
-            .iter()
-            .filter(|(_, t)| {
-                t.unit().is_some() && t.unit().unwrap().unit_type() == UnitType::PineTree
-            }).flat_map(|(&c, _)| {
-                let n = c.neighbors();
-                let mut m = Vec::new();
-                m.extend(n.iter());
-                m.into_iter()
-            }).collect();
-        let coordinates_to_add_forest: HashSet<Coord> = coordinates_to_maybe_add_forest
-            .into_iter()
-            .filter(|c| self.location.tile_at(*c).is_some())
-            .filter(|c| self.location.tile_at(*c).unwrap().surface().is_land())
-            .filter(|c| self.location.tile_at(*c).unwrap().unit().is_none())
-            .collect();
-        for coordinate in coordinates_to_add_forest.into_iter() {
-            self.create_and_place_unit(UnitType::PineTree, coordinate)
-                .unwrap();
+    fn tree_for(&self, coordinate: Coord) -> Option<UnitType> {
+        if self.current_turn % 2 != 0 && self.current_turn % 5 == 0 {
+            return None;
         }
+        let neighbours = coordinate.neighbors();
+        let (water_num, trees_num) = neighbours
+            .iter()
+            .map(|n| {
+                let tile = self.location.tile_at(*n);
+                let is_water = tile.is_none() || tile.unwrap().surface().is_water();
+                let has_tree = tile.is_some() && tile.unwrap().unit().map_or(false, |u| {
+                    u.unit_type() == UnitType::PalmTree || u.unit_type() == UnitType::PineTree
+                });
+                (if is_water { 1 } else { 0 }, if has_tree { 1 } else { 0 })
+            }).fold((0, 0), |(aa, ab), (ca, cb)| (aa + ca, ab + cb));
+        if water_num > 0 && trees_num >= 1 && self.current_turn % 5 != 0 {
+            Some(UnitType::PalmTree)
+        } else if trees_num >= 2 && self.current_turn % 2 == 0 {
+            Some(UnitType::PineTree)
+        } else {
+            None
+        }
+    }
+
+    fn add_tree(&mut self, coordinates: Vec<Coord>, unit_type: UnitType) {
+        for c in coordinates {
+            self.create_and_place_unit(unit_type, c).unwrap();
+        }
+    }
+
+    fn spread_forests(&mut self) {
+        // Each second turn a pine tree grows on each tile that has two or more neighbours with trees
+        // Each turn (skipping each fifths turn) a palm tree grows on each tile that has one
+        // neighbour with tree and one neighbor with water.
+        // Everything over the maps border is assumed to be water BTW
+        let mut coordinates_for_palms: Vec<Coord> = Vec::new();
+        let mut coordinates_for_pines: Vec<Coord> = Vec::new();
+        for (&c, tile) in self.location.map() {
+            if tile.surface().is_water() || tile.unit().is_some() {
+                continue;
+            }
+            if let Some(tree_type) = self.tree_for(c) {
+                match tree_type {
+                    UnitType::PineTree => coordinates_for_pines.push(c),
+                    UnitType::PalmTree => coordinates_for_palms.push(c),
+                    _ => (),
+                }
+            }
+        }
+        self.add_tree(coordinates_for_palms, UnitType::PalmTree);
+        self.add_tree(coordinates_for_pines, UnitType::PineTree);
     }
 
     fn end_turn(&mut self) {
         // Set of end-of-turn actions. Order is important.
-        self.remove_graves();
         self.apply_income();
         self.refill_moves();
-        self.kill_starving_units();
         self.spread_forests();
+        self.replace_graves_with_pine_trees();
+        self.kill_starving_units();
+        self.check_for_active_players();
         self.check_for_winner();
 
         // Now we can change turn number and find next active player to move
@@ -1118,7 +1171,25 @@ mod test {
     }
 
     #[test]
-    fn place_new_unit_simple_tile_has_other_unit() {
+    fn place_new_unit_simple_tile_has_other_replaceable_unit() {
+        let (pl, ri, mut game_engine) = create_valid_engine();
+        let coordinate = Coord::new(2, -1);
+        game_engine
+            .create_and_place_unit(UnitType::Grave, coordinate)
+            .unwrap();
+
+        let action = PlayerAction::PlaceNewUnit(ri[0], UnitType::Militia, coordinate);
+        let res = game_engine.act(pl[0].id(), action);
+
+        assert_eq!(res, Ok(()));
+        assert_eq!(
+            game_engine.region_money(ri[0]),
+            Some(CONTROLLED_REGION_STARTING_MONEY - description(UnitType::Militia).purchase_cost)
+        );
+    }
+
+    #[test]
+    fn place_new_unit_simple_tile_has_other_non_replaceable_unit() {
         let (pl, ri, mut game_engine) = create_valid_engine();
         let coordinate = Coord::new(1, -1);
 
@@ -1506,7 +1577,32 @@ mod test {
     }
 
     #[test]
-    fn move_unit_and_merge_all_ok() {
+    fn move_unit_and_merge_all_ok_goal_not_moved_before() {
+        let (pl, _, mut game_engine) = create_valid_engine();
+        let dst = Coord::new(2, -1);
+        let unit_id = game_engine
+            .create_and_place_unit(UnitType::Militia, dst)
+            .unwrap();
+        game_engine
+            .unit_info
+            .get_mut(&unit_id)
+            .unwrap()
+            .refill_moves();
+
+        let src = Coord::new(1, 0);
+        let action = PlayerAction::MoveUnit { src, dst };
+        let res = game_engine.act(pl[0].id(), action);
+
+        assert_eq!(res, Ok(()));
+
+        let unit = game_engine.location().tile_at(dst).unwrap().unit().unwrap();
+        let info = game_engine.unit_info(unit.id());
+        assert_eq!(unit.unit_type(), UnitType::Knight);
+        assert_eq!(info.moves_left(), STANDARD_MOVES_NUM);
+    }
+
+    #[test]
+    fn move_unit_and_merge_all_ok_goal_moved_before() {
         let (pl, _, mut game_engine) = create_valid_engine();
         let dst = Coord::new(2, -1);
         game_engine
@@ -1639,38 +1735,210 @@ mod test {
         assert_eq!(game_engine.current_turn(), 2);
         assert_eq!(*game_engine.active_player(), pl[0]);
 
-        // TODO: check that all post-turn things worked correctly
         unimplemented!()
     }
 
     #[test]
     fn end_turn_makes_active_player_inactive_if_nothing_left() {
-        unimplemented!()
+        let (pl, _ri, mut game_engine) = create_valid_engine();
+        game_engine
+            .act(
+                pl[0].id(),
+                PlayerAction::MoveUnit {
+                    src: Coord::new(1, 0),
+                    dst: Coord::new(1, 1),
+                },
+            ).unwrap();
+        game_engine.act(pl[0].id(), PlayerAction::EndTurn).unwrap();
+        game_engine.act(pl[1].id(), PlayerAction::EndTurn).unwrap();
+
+        // Before changing turn pl[1] should be active
+        assert_eq!(game_engine.player_activity[&pl[1].id()], true);
+
+        game_engine.act(pl[2].id(), PlayerAction::EndTurn).unwrap();
+
+        assert_eq!(game_engine.current_turn(), 2);
+        assert_eq!(*game_engine.active_player(), pl[0]);
+        assert_eq!(game_engine.player_activity[&pl[1].id()], false);
+
+        let grave = game_engine
+            .location
+            .tile_at(Coord::new(0, 1))
+            .unwrap()
+            .unit();
+        assert!(grave.is_some());
+        assert_eq!(grave.unwrap().unit_type(), UnitType::Grave);
     }
 
     #[test]
     fn end_turn_skips_first_player_if_he_is_inactive() {
-        unimplemented!()
+        let (pl, ri, mut game_engine) = create_valid_engine();
+        game_engine.modify_money(ri[1], description(UnitType::Knight).purchase_cost * 2);
+
+        game_engine.act(pl[0].id(), PlayerAction::EndTurn).unwrap();
+        game_engine
+            .act(
+                pl[1].id(),
+                PlayerAction::PlaceNewUnit(ri[1], UnitType::Knight, Coord::new(1, 0)),
+            ).unwrap();
+        game_engine
+            .act(
+                pl[1].id(),
+                PlayerAction::PlaceNewUnit(ri[1], UnitType::Knight, Coord::new(1, -1)),
+            ).unwrap();
+        game_engine.act(pl[1].id(), PlayerAction::EndTurn).unwrap();
+        game_engine.act(pl[2].id(), PlayerAction::EndTurn).unwrap();
+
+        assert_eq!(game_engine.current_turn(), 2);
+        assert_eq!(*game_engine.active_player(), pl[1]);
     }
 
     #[test]
     fn end_turn_selects_winner_if_any() {
-        unimplemented!()
+        let (pl, ri, mut game_engine) = create_valid_engine();
+        game_engine.modify_money(ri[0], description(UnitType::Soldier).purchase_cost);
+        game_engine
+            .act(
+                pl[0].id(),
+                PlayerAction::MoveUnit {
+                    src: Coord::new(1, 0),
+                    dst: Coord::new(1, 1),
+                },
+            ).unwrap();
+        game_engine
+            .act(
+                pl[0].id(),
+                PlayerAction::PlaceNewUnit(ri[0], UnitType::Soldier, Coord::new(-1, 0)),
+            ).unwrap();
+        game_engine.act(pl[0].id(), PlayerAction::EndTurn).unwrap();
+        game_engine.act(pl[1].id(), PlayerAction::EndTurn).unwrap();
+
+        assert_eq!(game_engine.current_turn(), 2);
+        assert_eq!(*game_engine.active_player(), pl[0]);
+        assert_eq!(game_engine.winner(), Some(pl[0].id()));
     }
 
     #[test]
     fn end_turn_spawns_graves_if_units_die_from_starvation() {
-        unimplemented!()
+        let (pl, ri, mut game_engine) = create_valid_engine();
+        game_engine.modify_money(ri[0], -CONTROLLED_REGION_STARTING_MONEY);
+        game_engine.act(pl[0].id(), PlayerAction::EndTurn).unwrap();
+        game_engine.act(pl[1].id(), PlayerAction::EndTurn).unwrap();
+        game_engine.act(pl[2].id(), PlayerAction::EndTurn).unwrap();
+
+        assert_eq!(game_engine.current_turn(), 2);
+        assert_eq!(*game_engine.active_player(), pl[0]);
+
+        let grave = game_engine
+            .location
+            .tile_at(Coord::new(1, 0))
+            .unwrap()
+            .unit();
+        assert!(grave.is_some());
+        assert_eq!(grave.unwrap().unit_type(), UnitType::Grave);
     }
 
     #[test]
     fn end_turn_spawns_trees_on_top_of_graves() {
-        unimplemented!()
+        let (pl, _ri, mut game_engine) = create_valid_engine();
+        let coordinate = Coord::new(2, -1);
+        game_engine
+            .create_and_place_unit(UnitType::Grave, coordinate)
+            .unwrap();
+        game_engine.act(pl[0].id(), PlayerAction::EndTurn).unwrap();
+        game_engine.act(pl[1].id(), PlayerAction::EndTurn).unwrap();
+        game_engine.act(pl[2].id(), PlayerAction::EndTurn).unwrap();
+
+        assert_eq!(game_engine.current_turn(), 2);
+        assert_eq!(*game_engine.active_player(), pl[0]);
+
+        let tree = game_engine.location.tile_at(coordinate).unwrap().unit();
+        assert!(tree.is_some());
+        assert_eq!(tree.unwrap().unit_type(), UnitType::PineTree);
     }
 
     #[test]
-    fn end_turn_spreads_trees() {
-        unimplemented!()
+    fn end_turn_dont_spreads_trees_on_existing_units() {
+        let (pl, _ri, mut game_engine) = create_valid_engine();
+        let coordinate = Coord::new(1, 0);
+        game_engine.maybe_remove_unit(coordinate).unwrap();
+        game_engine
+            .create_and_place_unit(UnitType::PalmTree, coordinate)
+            .unwrap();
+
+        game_engine.act(pl[0].id(), PlayerAction::EndTurn).unwrap();
+        game_engine.act(pl[1].id(), PlayerAction::EndTurn).unwrap();
+        game_engine.act(pl[2].id(), PlayerAction::EndTurn).unwrap();
+
+        assert_eq!(game_engine.current_turn(), 2);
+        assert_eq!(*game_engine.active_player(), pl[0]);
+
+        let tree = game_engine
+            .location()
+            .tile_at(coordinate)
+            .unwrap()
+            .unit()
+            .unwrap();
+        assert_eq!(tree.unit_type(), UnitType::PalmTree);
+
+        let tree = game_engine
+            .location()
+            .tile_at(Coord::new(2, -1))
+            .unwrap()
+            .unit()
+            .unwrap();
+        assert_eq!(tree.unit_type(), UnitType::PalmTree);
+
+        let tree = game_engine
+            .location()
+            .tile_at(Coord::new(1, 1))
+            .unwrap()
+            .unit()
+            .unwrap();
+        assert_eq!(tree.unit_type(), UnitType::PalmTree);
+
+        let unit = game_engine
+            .location()
+            .tile_at(Coord::new(0, 1))
+            .unwrap()
+            .unit()
+            .unwrap();
+        assert_eq!(unit.unit_type(), UnitType::Militia);
+    }
+
+    #[test]
+    fn capital_replaces_unit_if_old_one_is_removed_and_there_is_no_space_left() {
+        let (pl, _ri, mut game_engine) = create_valid_engine();
+        game_engine
+            .create_and_place_unit(UnitType::Militia, Coord::new(1, 1))
+            .unwrap();
+        game_engine
+            .act(
+                pl[0].id(),
+                PlayerAction::MoveUnit {
+                    src: Coord::new(1, 0),
+                    dst: Coord::new(2, 0),
+                },
+            ).unwrap();
+
+        let unit_one = game_engine
+            .location()
+            .tile_at(Coord::new(1, 1))
+            .unwrap()
+            .unit()
+            .unwrap();
+        let unit_two = game_engine
+            .location()
+            .tile_at(Coord::new(0, 1))
+            .unwrap()
+            .unit()
+            .unwrap();
+        assert!(
+            unit_one.unit_type() == UnitType::Village || unit_two.unit_type() == UnitType::Village
+        );
+        assert!(
+            unit_one.unit_type() == UnitType::Militia || unit_two.unit_type() == UnitType::Militia
+        );
     }
 
     #[test]

@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use super::consts::*;
 use super::ids::ID;
 use super::location::{Coord, Location, LocationValidationError, Player, UnitType};
+use super::unit::description;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub enum LocationRulesValidationError {
@@ -139,7 +140,8 @@ pub fn validate_regions(
             let unit_count = region
                 .coordinates()
                 .iter()
-                .filter(|&c| location.tile_at(*c).unwrap().unit().is_some())
+                .filter_map(|&c| location.tile_at(c).unwrap().unit())
+                .filter(|u| !description(u.unit_type()).is_unownable)
                 .count();
             is_active = unit_count > 0;
         }

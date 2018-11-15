@@ -16,7 +16,7 @@ pub const STANDARD_MOVES_NUM: u32 = 4;
 
 pub const GRAVE: UnitDescription = UnitDescription {
     name: UnitType::Grave,
-    is_replaceable: true,
+    is_unownable: true,
     is_purchasable: false,
     purchase_cost: 0,
     turn_cost: 0,
@@ -29,7 +29,7 @@ pub const GRAVE: UnitDescription = UnitDescription {
 
 pub const PINE_TREE: UnitDescription = UnitDescription {
     name: UnitType::PineTree,
-    is_replaceable: true,
+    is_unownable: true,
     is_purchasable: false,
     purchase_cost: 0,
     turn_cost: 1,
@@ -42,7 +42,7 @@ pub const PINE_TREE: UnitDescription = UnitDescription {
 
 pub const PALM_TREE: UnitDescription = UnitDescription {
     name: UnitType::PalmTree,
-    is_replaceable: true,
+    is_unownable: true,
     is_purchasable: false,
     purchase_cost: 0,
     turn_cost: 1,
@@ -55,7 +55,7 @@ pub const PALM_TREE: UnitDescription = UnitDescription {
 
 pub const VILLAGE: UnitDescription = UnitDescription {
     name: UnitType::Village,
-    is_replaceable: false,
+    is_unownable: false,
     is_purchasable: false,
     purchase_cost: 0,
     turn_cost: 0,
@@ -68,7 +68,7 @@ pub const VILLAGE: UnitDescription = UnitDescription {
 
 pub const TOWER: UnitDescription = UnitDescription {
     name: UnitType::Tower,
-    is_replaceable: false,
+    is_unownable: false,
     is_purchasable: true,
     purchase_cost: 15,
     turn_cost: 0,
@@ -81,7 +81,7 @@ pub const TOWER: UnitDescription = UnitDescription {
 
 pub const GREAT_KNIGHT: UnitDescription = UnitDescription {
     name: UnitType::GreatKnight,
-    is_replaceable: false,
+    is_unownable: false,
     is_purchasable: true,
     purchase_cost: 40,
     turn_cost: 54,
@@ -94,7 +94,7 @@ pub const GREAT_KNIGHT: UnitDescription = UnitDescription {
 
 pub const KNIGHT: UnitDescription = UnitDescription {
     name: UnitType::Knight,
-    is_replaceable: false,
+    is_unownable: false,
     is_purchasable: true,
     purchase_cost: 30,
     turn_cost: 18,
@@ -107,7 +107,7 @@ pub const KNIGHT: UnitDescription = UnitDescription {
 
 pub const SOLDIER: UnitDescription = UnitDescription {
     name: UnitType::Soldier,
-    is_replaceable: false,
+    is_unownable: false,
     is_purchasable: true,
     purchase_cost: 20,
     turn_cost: 6,
@@ -120,7 +120,7 @@ pub const SOLDIER: UnitDescription = UnitDescription {
 
 pub const MILITIA: UnitDescription = UnitDescription {
     name: UnitType::Militia,
-    is_replaceable: false,
+    is_unownable: false,
     is_purchasable: true,
     purchase_cost: 10,
     turn_cost: 2,

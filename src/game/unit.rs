@@ -5,7 +5,7 @@ use super::location::{Tile, Unit, UnitType};
 #[derive(Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub struct UnitDescription {
     pub name: UnitType,
-    pub is_replaceable: bool,
+    pub is_unownable: bool,
     pub is_purchasable: bool,
     pub purchase_cost: i32,
     pub turn_cost: i32,
@@ -145,7 +145,7 @@ pub fn can_step_on(_unit_type: UnitType, tile: &Tile) -> bool {
 pub fn merge_result(actor: UnitType, goal: UnitType) -> Option<UnitType> {
     let goal_description = description(goal);
 
-    if goal_description.is_replaceable {
+    if goal_description.is_unownable {
         Some(actor)
     } else if goal_description.upgrades_to.is_some() {
         let actor_description = description(actor);
