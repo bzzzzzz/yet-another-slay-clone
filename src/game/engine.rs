@@ -832,7 +832,14 @@ impl GameEngine {
     }
 
     fn apply_income(&mut self) {
-        for info in self.region_info.values_mut() {
+        for (id, region) in self.location.regions() {
+            if region.coordinates().len() < MIN_CONTROLLED_REGION_SIZE {
+                let c = *region.coordinates().iter().next().unwrap();
+                if self.location().tile_at(c).unwrap().unit().is_none() {
+                    continue;
+                }
+            }
+            let info = self.region_info.get_mut(id).unwrap();
             let sum = info.income_from_fields - info.maintenance_cost;
             info.change_balance(sum);
         }
@@ -1727,7 +1734,7 @@ mod test {
 
     #[test]
     fn end_players_turn_from_last_player_changes_turn() {
-        let (pl, _ri, mut game_engine) = create_valid_engine();
+        let (pl, ri, mut game_engine) = create_valid_engine();
         game_engine.act(pl[0].id(), PlayerAction::EndTurn).unwrap();
         game_engine.act(pl[1].id(), PlayerAction::EndTurn).unwrap();
         game_engine.act(pl[2].id(), PlayerAction::EndTurn).unwrap();
@@ -1735,7 +1742,28 @@ mod test {
         assert_eq!(game_engine.current_turn(), 2);
         assert_eq!(*game_engine.active_player(), pl[0]);
 
-        unimplemented!()
+        let soldier = game_engine
+            .location()
+            .tile_at(Coord::new(1, 0))
+            .unwrap()
+            .unit()
+            .unwrap();
+        let info = game_engine.unit_info(soldier.id());
+        assert_eq!(info.moves_left(), description(UnitType::Soldier).max_moves);
+
+        let militia = game_engine
+            .location()
+            .tile_at(Coord::new(0, 1))
+            .unwrap()
+            .unit()
+            .unwrap();
+        let info = game_engine.unit_info(militia.id());
+        assert_eq!(info.moves_left(), description(UnitType::Militia).max_moves);
+
+        assert_eq!(game_engine.region_money(ri[0]), Some(8));
+        assert_eq!(game_engine.region_money(ri[1]), Some(11));
+        assert_eq!(game_engine.region_money(ri[2]), Some(0));
+        assert_eq!(game_engine.region_money(ri[3]), Some(12));
     }
 
     #[test]
