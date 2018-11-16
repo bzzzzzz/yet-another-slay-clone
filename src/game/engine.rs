@@ -68,7 +68,7 @@ impl From<LocationModificationError> for PlayerActionError {
 
 /// Regional information that is stored on game engine level
 /// money_balance value is stored only here, other values are recountable and stored only for caching purposes
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd, Serialize, Deserialize)]
 struct RegionInfo {
     money_balance: i32,
     income_from_fields: i32,
@@ -108,7 +108,7 @@ impl RegionInfo {
 }
 
 /// Game engine struct stores the whole state of the game and allows players to make their turns
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct GameEngine {
     players: Vec<Player>,
     player_activity: HashMap<ID, bool>,
@@ -159,6 +159,22 @@ impl GameEngine {
         engine.refill_moves();
 
         Ok(engine)
+    }
+
+    /// Fix all countable fields
+    pub fn repair(&mut self) {
+        self.recount_region_info();
+        let mut to_fix = Vec::new();
+        for tile in self.location().map().values() {
+            if let Some(unit) = tile.unit() {
+                to_fix.push((unit.id(), unit.unit_type()));
+            }
+        }
+
+        for (id, unit_type) in to_fix.into_iter() {
+            let info = self.unit_info.get_mut(&id).unwrap();
+            info.change_description(description(unit_type));
+        }
     }
 
     /// Check that locations is consistent and everything is placed corresponding to game rules
@@ -502,7 +518,7 @@ impl GameEngine {
         unit_type: UnitType,
         coordinate: Coord,
     ) -> Result<ID, LocationModificationError> {
-        let (unit, info) = UnitInfo::new(self.id_producer.next(), unit_type);
+        let (unit, info) = UnitInfo::new(self.id_producer.next_id(), unit_type);
         self.unit_info.insert(unit.id(), info);
 
         self.location.place_unit(unit, coordinate)?;
@@ -972,29 +988,29 @@ mod test {
     fn create_valid_engine() -> (Vec<Player>, Vec<ID>, GameEngine) {
         let mut id_producer = IdProducer::default();
         let mut map = HashMap::default();
-        map.insert(Coord::new(0, -1), Tile::new(id_producer.next(), Land));
-        map.insert(Coord::new(1, -1), Tile::new(id_producer.next(), Land));
-        map.insert(Coord::new(2, -1), Tile::new(id_producer.next(), Land));
-        map.insert(Coord::new(3, -1), Tile::new(id_producer.next(), Water));
-        map.insert(Coord::new(-1, 0), Tile::new(id_producer.next(), Land));
-        map.insert(Coord::new(0, 0), Tile::new(id_producer.next(), Water));
-        map.insert(Coord::new(1, 0), Tile::new(id_producer.next(), Land));
-        map.insert(Coord::new(2, 0), Tile::new(id_producer.next(), Land));
-        map.insert(Coord::new(-2, 1), Tile::new(id_producer.next(), Land));
-        map.insert(Coord::new(-1, 1), Tile::new(id_producer.next(), Land));
-        map.insert(Coord::new(0, 1), Tile::new(id_producer.next(), Land));
-        map.insert(Coord::new(1, 1), Tile::new(id_producer.next(), Land));
+        map.insert(Coord::new(0, -1), Tile::new(id_producer.next_id(), Land));
+        map.insert(Coord::new(1, -1), Tile::new(id_producer.next_id(), Land));
+        map.insert(Coord::new(2, -1), Tile::new(id_producer.next_id(), Land));
+        map.insert(Coord::new(3, -1), Tile::new(id_producer.next_id(), Water));
+        map.insert(Coord::new(-1, 0), Tile::new(id_producer.next_id(), Land));
+        map.insert(Coord::new(0, 0), Tile::new(id_producer.next_id(), Water));
+        map.insert(Coord::new(1, 0), Tile::new(id_producer.next_id(), Land));
+        map.insert(Coord::new(2, 0), Tile::new(id_producer.next_id(), Land));
+        map.insert(Coord::new(-2, 1), Tile::new(id_producer.next_id(), Land));
+        map.insert(Coord::new(-1, 1), Tile::new(id_producer.next_id(), Land));
+        map.insert(Coord::new(0, 1), Tile::new(id_producer.next_id(), Land));
+        map.insert(Coord::new(1, 1), Tile::new(id_producer.next_id(), Land));
 
         let players = vec![
-            Player::new(id_producer.next()),
-            Player::new(id_producer.next()),
-            Player::new(id_producer.next()),
+            Player::new(id_producer.next_id()),
+            Player::new(id_producer.next_id()),
+            Player::new(id_producer.next_id()),
         ];
         let region_ids = vec![
-            id_producer.next(),
-            id_producer.next(),
-            id_producer.next(),
-            id_producer.next(),
+            id_producer.next_id(),
+            id_producer.next_id(),
+            id_producer.next_id(),
+            id_producer.next_id(),
         ];
 
         let coords = [
@@ -1027,27 +1043,27 @@ mod test {
             Location::new(map, vec![region_one, region_two, region_three, region_four]).unwrap();
         location
             .place_unit(
-                Unit::new(id_producer.next(), UnitType::Village),
+                Unit::new(id_producer.next_id(), UnitType::Village),
                 Coord::new(1, -1),
             ).unwrap();
         location
             .place_unit(
-                Unit::new(id_producer.next(), UnitType::Soldier),
+                Unit::new(id_producer.next_id(), UnitType::Soldier),
                 Coord::new(1, 0),
             ).unwrap();
         location
             .place_unit(
-                Unit::new(id_producer.next(), UnitType::Militia),
+                Unit::new(id_producer.next_id(), UnitType::Militia),
                 Coord::new(0, 1),
             ).unwrap();
         location
             .place_unit(
-                Unit::new(id_producer.next(), UnitType::Village),
+                Unit::new(id_producer.next_id(), UnitType::Village),
                 Coord::new(2, 0),
             ).unwrap();
         location
             .place_unit(
-                Unit::new(id_producer.next(), UnitType::Village),
+                Unit::new(id_producer.next_id(), UnitType::Village),
                 Coord::new(-1, 0),
             ).unwrap();
 

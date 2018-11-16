@@ -16,8 +16,14 @@ pub struct UnitDescription {
     pub upgrades_to: Option<&'static UnitDescription>,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
+fn default_description() -> &'static UnitDescription {
+    description(UnitType::Grave)
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct UnitInfo {
+    #[serde(skip)]
+    #[serde(default = "default_description")]
     description: &'static UnitDescription,
     moves_left: u32,
 }
@@ -38,6 +44,10 @@ impl UnitInfo {
         let info = Self::from(unit);
 
         (unit, info)
+    }
+
+    pub fn change_description(&mut self, new_description: &'static UnitDescription) {
+        self.description = new_description;
     }
 
     pub fn moves_left(&self) -> u32 {

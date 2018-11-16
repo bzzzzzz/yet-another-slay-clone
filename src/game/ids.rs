@@ -3,13 +3,13 @@ pub type ID = u32;
 pub const NO_ID: ID = 0;
 
 /// Class that always returns unique id
-#[derive(Eq, PartialEq, Debug, Default)]
+#[derive(Clone, Eq, PartialEq, Debug, Default, Serialize, Deserialize)]
 pub struct IdProducer {
     last_issued_id: ID,
 }
 
 impl IdProducer {
-    pub fn next(&mut self) -> ID {
+    pub fn next_id(&mut self) -> ID {
         self.last_issued_id += 1;
         self.last_issued_id
     }
@@ -28,7 +28,7 @@ mod test {
 
         let size: usize = 100000;
         for _ in 1..size {
-            used_values.insert(producer.next());
+            used_values.insert(producer.next_id());
         }
         assert_eq!(used_values.len(), size - 1);
         assert!(!used_values.contains(&NO_ID));

@@ -6,7 +6,7 @@ use super::ids::{IdProducer, ID, NO_ID};
 
 pub type Coord = Coordinate<i32>;
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd, Serialize, Deserialize)]
 pub enum UnitType {
     Grave,
     PineTree,
@@ -19,7 +19,7 @@ pub enum UnitType {
     Militia,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct Unit {
     id: ID,
     unit_type: UnitType,
@@ -39,7 +39,7 @@ impl Unit {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd, Serialize, Deserialize)]
 pub enum TileSurface {
     Water,
     Land,
@@ -78,7 +78,7 @@ impl TileSurface {
 }
 
 /// This struct represents contents of one tile of the hexagonal map
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct Tile {
     id: ID,
     surface: TileSurface,
@@ -117,7 +117,7 @@ impl Tile {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct Player {
     id: ID,
 }
@@ -134,7 +134,7 @@ impl Player {
 
 /// This represent some connected set of tiles on a hexagonal map. It should be always not empty and
 /// always owned by somebody.
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Region {
     id: ID,
     owner: Player,
@@ -190,7 +190,7 @@ pub enum LocationModificationError {
     InvalidResult(LocationValidationError),
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Location {
     map: HashMap<Coord, Tile>,
     regions: HashMap<ID, Region>,
@@ -530,7 +530,7 @@ impl Location {
 
         let owner_id = self.regions[&region_id].owner.id;
         while let Some(coordinates) = self.region_part_to_remove(region_id) {
-            let new_id = id_producer.next();
+            let new_id = id_producer.next_id();
             results.push(new_id);
 
             for coordinate in coordinates.iter() {

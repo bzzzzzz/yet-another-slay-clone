@@ -5,4 +5,10 @@ authors = ["Evgeny Barbashov <evgeny.barbashov@gmail.com>"]
 license = "MIT"
 
 [dependencies]
+chrono = {version = "0.4.6", features = ["serde"]}
 hex2d = { git = "https://github.com/dpc/hex2d-rs", rev = "e3d6d85"}
+log = "0.4.6"
+serde = "1.0.80"
+serde_derive = "1.0.80"
+serde_yaml = "0.8.7"
+tempfile = "3.0.4"
