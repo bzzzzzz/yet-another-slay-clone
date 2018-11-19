@@ -23,16 +23,12 @@ struct SavedGame {
     engine: GameEngine,
 }
 
+#[derive(Clone, Debug)]
 pub struct SavedGamesCatalog {
     version: u8,
     root: PathBuf,
     prefix: String,
     saved_games: Vec<SavedGameInfo>,
-}
-
-pub enum CatalogInitiationErr {
-    BadRoot,
-    NoRights,
 }
 
 impl SavedGamesCatalog {

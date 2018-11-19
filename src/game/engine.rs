@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet};
 use super::consts::*;
 use super::ids::{IdProducer, ID};
 use super::location::{
-    Coord, Location, LocationModificationError, Player, Region, RegionTransformation, Unit,
-    UnitType,
+    Coord, Location, LocationModificationError, LocationValidationError, Player, Region,
+    RegionTransformation, Unit, UnitType,
 };
 use super::rules::{
     validate_location, validate_regions, LocationRulesValidationError, RegionsValidationError,
@@ -26,6 +26,12 @@ pub enum EngineValidationError {
 impl From<LocationRulesValidationError> for EngineValidationError {
     fn from(e: LocationRulesValidationError) -> Self {
         EngineValidationError::LocationError(e)
+    }
+}
+
+impl From<LocationValidationError> for EngineValidationError {
+    fn from(e: LocationValidationError) -> Self {
+        EngineValidationError::LocationError(LocationRulesValidationError::InitiationError(e))
     }
 }
 

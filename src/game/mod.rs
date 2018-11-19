@@ -11,4 +11,5 @@ pub use self::location::{
     Coord, Location, LocationModificationError, LocationValidationError, Player, Region, Tile,
     TileSurface, Unit, UnitType,
 };
+pub use self::rules::{validate_location, validate_regions, LocationRulesValidationError};
 pub use self::unit::{UnitDescription, UnitInfo};

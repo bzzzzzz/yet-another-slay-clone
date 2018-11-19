@@ -102,17 +102,21 @@ impl Tile {
         &self.surface
     }
 
+    pub fn set_surface(&mut self, new_surface: TileSurface) {
+        self.surface = new_surface;
+    }
+
     pub fn unit(&self) -> Option<&Unit> {
         self.unit.as_ref()
     }
 
     /// Remove unit from this tile and return it
-    fn take_unit(&mut self) -> Option<Unit> {
+    pub fn take_unit(&mut self) -> Option<Unit> {
         self.unit.take()
     }
 
     /// Place unit on this tile
-    fn place_unit(&mut self, unit: Unit) {
+    pub fn place_unit(&mut self, unit: Unit) {
         self.unit = Some(unit);
     }
 }
@@ -423,7 +427,7 @@ impl Location {
         }
         self.merge_regions(merge_ids, region_id);
 
-        Location::validate(self).expect("Adding region never should make location invalid");
+        Self::validate(self).expect("Adding region never should make location invalid");
 
         Ok(performed_actions)
     }
