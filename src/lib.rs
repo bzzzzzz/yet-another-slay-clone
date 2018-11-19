@@ -8,4 +8,5 @@ extern crate serde;
 extern crate serde_yaml;
 
 pub mod game;
+pub mod init;
 pub mod saves;
