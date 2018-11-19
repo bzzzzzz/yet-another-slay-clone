@@ -3,6 +3,7 @@ mod engine;
 mod ids;
 mod location;
 mod rules;
+pub mod test_util;
 mod unit;
 
 pub use self::engine::{EngineValidationError, GameEngine, PlayerAction, PlayerActionError};

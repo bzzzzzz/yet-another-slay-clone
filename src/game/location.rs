@@ -685,7 +685,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashSet;
 
     use super::TileSurface::*;
     use super::{
@@ -693,6 +693,7 @@ mod test {
         RegionTransformation, Tile, TileSurface, Unit, UnitType,
     };
     use game::ids::IdProducer;
+    use game::test_util::create_simple_map as test_map;
 
     #[test]
     fn tile_place_unit() {
@@ -716,28 +717,6 @@ mod test {
         let taken_unit = tile.take_unit();
         assert_eq!(taken_unit, Some(unit));
         assert_eq!(tile.unit(), None);
-    }
-
-    /// This test method creates a small hex map like this one:
-    ///  * *
-    /// * * *
-    ///  * *
-    /// This game uses axial coordinates hexes with pointy tops, so coordinates will be:
-    ///    (0,1)   (1,0)
-    /// (-1,1) (0,0) (1,-1)
-    ///   (-1, 0)  (0,-1)
-    ///
-    /// Surfaces array represents surfaces of each of seven points starting from top left one
-    fn test_map(surfaces: [TileSurface; 7]) -> HashMap<Coord, Tile> {
-        let mut map = HashMap::default();
-        map.insert(Coord::new(0, 1), Tile::new(1, surfaces[0]));
-        map.insert(Coord::new(1, 0), Tile::new(2, surfaces[1]));
-        map.insert(Coord::new(-1, 1), Tile::new(3, surfaces[2]));
-        map.insert(Coord::new(0, 0), Tile::new(4, surfaces[3]));
-        map.insert(Coord::new(1, -1), Tile::new(5, surfaces[4]));
-        map.insert(Coord::new(-1, 0), Tile::new(6, surfaces[5]));
-        map.insert(Coord::new(0, -1), Tile::new(7, surfaces[6]));
-        map
     }
 
     #[test]

@@ -970,114 +970,12 @@ impl GameEngine {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
-
     use super::{GameEngine, PlayerAction, PlayerActionError};
     use game::consts::*;
-    use game::ids::{IdProducer, ID};
-    use game::location::TileSurface::*;
-    use game::location::{Coord, Location, Player, Region, Tile, Unit, UnitType};
+    use game::ids::ID;
+    use game::location::{Coord, Player, UnitType};
+    use game::test_util::create_valid_engine;
     use game::unit::description;
-
-    /// This function will create valid engine for testing with following structure:
-    ///
-    ///  Surface:    Owners:
-    ///   * V * ~     1 1 1 ~
-    ///  V ~ S V     3 ~ 1 2
-    /// * * M *     3 1 2 2
-    ///
-    /// Coordinates:
-    ///       0/-1  1/-1  2/-1  3/-1
-    ///   -1/0   0/0   1/0   2/0
-    /// -2/1  -1/1  0/1   1/1
-    ///
-    fn create_valid_engine() -> (Vec<Player>, Vec<ID>, GameEngine) {
-        let mut id_producer = IdProducer::default();
-        let mut map = HashMap::default();
-        map.insert(Coord::new(0, -1), Tile::new(id_producer.next_id(), Land));
-        map.insert(Coord::new(1, -1), Tile::new(id_producer.next_id(), Land));
-        map.insert(Coord::new(2, -1), Tile::new(id_producer.next_id(), Land));
-        map.insert(Coord::new(3, -1), Tile::new(id_producer.next_id(), Water));
-        map.insert(Coord::new(-1, 0), Tile::new(id_producer.next_id(), Land));
-        map.insert(Coord::new(0, 0), Tile::new(id_producer.next_id(), Water));
-        map.insert(Coord::new(1, 0), Tile::new(id_producer.next_id(), Land));
-        map.insert(Coord::new(2, 0), Tile::new(id_producer.next_id(), Land));
-        map.insert(Coord::new(-2, 1), Tile::new(id_producer.next_id(), Land));
-        map.insert(Coord::new(-1, 1), Tile::new(id_producer.next_id(), Land));
-        map.insert(Coord::new(0, 1), Tile::new(id_producer.next_id(), Land));
-        map.insert(Coord::new(1, 1), Tile::new(id_producer.next_id(), Land));
-
-        let players = vec![
-            Player::new(id_producer.next_id()),
-            Player::new(id_producer.next_id()),
-            Player::new(id_producer.next_id()),
-        ];
-        let region_ids = vec![
-            id_producer.next_id(),
-            id_producer.next_id(),
-            id_producer.next_id(),
-            id_producer.next_id(),
-        ];
-
-        let coords = [
-            Coord::new(0, -1),
-            Coord::new(1, -1),
-            Coord::new(2, -1),
-            Coord::new(1, 0),
-        ]
-            .iter()
-            .cloned()
-            .collect();
-        let region_one = Region::new(region_ids[0], players[0], coords);
-
-        let coords = [Coord::new(2, 0), Coord::new(1, 1), Coord::new(0, 1)]
-            .iter()
-            .cloned()
-            .collect();
-        let region_two = Region::new(region_ids[1], players[1], coords);
-
-        let coords = [Coord::new(-1, 1)].iter().cloned().collect();
-        let region_three = Region::new(region_ids[2], players[0], coords);
-
-        let coords = [Coord::new(-1, 0), Coord::new(-2, 1)]
-            .iter()
-            .cloned()
-            .collect();
-        let region_four = Region::new(region_ids[3], players[2], coords);
-
-        let mut location =
-            Location::new(map, vec![region_one, region_two, region_three, region_four]).unwrap();
-        location
-            .place_unit(
-                Unit::new(id_producer.next_id(), UnitType::Village),
-                Coord::new(1, -1),
-            ).unwrap();
-        location
-            .place_unit(
-                Unit::new(id_producer.next_id(), UnitType::Soldier),
-                Coord::new(1, 0),
-            ).unwrap();
-        location
-            .place_unit(
-                Unit::new(id_producer.next_id(), UnitType::Militia),
-                Coord::new(0, 1),
-            ).unwrap();
-        location
-            .place_unit(
-                Unit::new(id_producer.next_id(), UnitType::Village),
-                Coord::new(2, 0),
-            ).unwrap();
-        location
-            .place_unit(
-                Unit::new(id_producer.next_id(), UnitType::Village),
-                Coord::new(-1, 0),
-            ).unwrap();
-
-        let game_engine =
-            GameEngine::new(location, vec![players[0], players[1], players[2]]).unwrap();
-
-        (players, region_ids, game_engine)
-    }
 
     #[test]
     fn create_engine_correct() {
