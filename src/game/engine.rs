@@ -130,7 +130,11 @@ pub struct GameEngine {
 }
 
 impl GameEngine {
-    pub fn new(location: Location, players: Vec<Player>) -> Result<Self, EngineValidationError> {
+    pub fn new(
+        location: Location,
+        players: Vec<Player>,
+        id_producer: IdProducer,
+    ) -> Result<Self, EngineValidationError> {
         let mut region_info = HashMap::default();
         for (id, region) in location.regions().iter() {
             let money = if region.coordinates().len() >= MIN_CONTROLLED_REGION_SIZE {
@@ -153,10 +157,10 @@ impl GameEngine {
             player_activity,
             unit_info,
             region_info,
+            id_producer,
             winner: None,
             current_turn: 1,
             active_player_num: 0,
-            id_producer: IdProducer::default(),
         };
         engine.recount_region_info();
         engine.validate()?;

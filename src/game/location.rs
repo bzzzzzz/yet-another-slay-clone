@@ -168,6 +168,10 @@ impl Region {
     pub fn coordinates(&self) -> &HashSet<Coord> {
         &self.coordinates
     }
+
+    pub fn add(&mut self, coordinate: Coord) {
+        self.coordinates.insert(coordinate);
+    }
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]

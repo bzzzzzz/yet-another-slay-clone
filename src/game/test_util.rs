@@ -207,7 +207,11 @@ pub fn create_valid_engine() -> (Vec<Player>, Vec<ID>, GameEngine) {
             Coord::new(-1, 0),
         ).unwrap();
 
-    let game_engine = GameEngine::new(location, vec![players[0], players[1], players[2]]).unwrap();
+    let game_engine = GameEngine::new(
+        location,
+        vec![players[0], players[1], players[2]],
+        id_producer,
+    ).unwrap();
 
     (players, region_ids, game_engine)
 }
