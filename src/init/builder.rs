@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use game::{
+use crate::game::{
     Coord, EngineValidationError, GameEngine, IdProducer, Location, Player, Region, Tile,
     TileSurface, Unit, UnitType, ID,
 };
@@ -229,7 +229,7 @@ impl GameEngineBuilder {
 #[cfg(test)]
 mod test {
     use super::{GameEngineBuilder, GameEngineBuilderInitiationError};
-    use game::{Coord, Player, TileSurface};
+    use crate::game::{Coord, Player, TileSurface};
 
     #[test]
     fn check_circle_creation_size_error() {

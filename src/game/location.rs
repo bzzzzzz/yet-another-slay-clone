@@ -696,8 +696,8 @@ mod test {
         Coord, Location, LocationModificationError, LocationValidationError, Player, Region,
         RegionTransformation, Tile, TileSurface, Unit, UnitType,
     };
-    use game::ids::IdProducer;
-    use game::test_util::create_simple_map as test_map;
+    use crate::game::ids::IdProducer;
+    use crate::game::test_util::create_simple_map as test_map;
 
     #[test]
     fn tile_place_unit() {

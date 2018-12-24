@@ -975,11 +975,11 @@ impl GameEngine {
 #[cfg(test)]
 mod test {
     use super::{GameEngine, PlayerAction, PlayerActionError};
-    use game::consts::*;
-    use game::ids::ID;
-    use game::location::{Coord, Player, UnitType};
-    use game::test_util::create_valid_engine;
-    use game::unit::description;
+    use crate::game::consts::*;
+    use crate::game::ids::ID;
+    use crate::game::location::{Coord, Player, UnitType};
+    use crate::game::test_util::create_valid_engine;
+    use crate::game::unit::description;
 
     #[test]
     fn create_engine_correct() {

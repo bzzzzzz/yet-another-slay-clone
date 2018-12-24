@@ -173,13 +173,13 @@ pub fn validate_regions(
 mod test {
     use std::collections::HashSet;
 
-    use game::location::TileSurface::*;
-    use game::location::{Coord, Location, Player, Region, Unit, UnitType};
+    use crate::game::location::TileSurface::*;
+    use crate::game::location::{Coord, Location, Player, Region, Unit, UnitType};
 
     use super::{
         validate_location, validate_regions, LocationRulesValidationError, RegionsValidationError,
     };
-    use game::test_util::create_simple_map as test_map;
+    use crate::game::test_util::create_simple_map as test_map;
 
     #[test]
     fn validate_location_no_errors() {

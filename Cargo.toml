@@ -3,6 +3,7 @@ name = "yasc"
 version = "0.1.0"
 authors = ["Evgeny Barbashov <evgeny.barbashov@gmail.com>"]
 license = "MIT"
+edition = "2018"
 
 [dependencies]
 chrono = {version = "0.4.6", features = ["serde"]}
