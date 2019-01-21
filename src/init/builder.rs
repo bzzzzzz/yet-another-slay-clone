@@ -9,13 +9,13 @@ use hex2d::Direction;
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum GameEngineBuilderInitiationError {
     NotEnoughPlayers(u8),
-    DuplicatePlayers,
     TooSmallMap,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum GameEngineBuilderModificationError {
     CoordinateOutOfBounds(Coord),
+    CoordinateCannotBeOwned(Coord),
     NoSuchPlayer(ID),
 }
 
@@ -31,16 +31,16 @@ pub struct GameEngineBuilder {
 impl GameEngineBuilder {
     fn new(
         map: HashMap<Coord, Tile>,
-        players: Vec<Player>,
-        id_producer: IdProducer,
+        players_num: u8,
+        mut id_producer: IdProducer,
     ) -> Result<Self, GameEngineBuilderInitiationError> {
-        if players.len() <= 1 {
+        if players_num <= 1 {
             return Err(GameEngineBuilderInitiationError::NotEnoughPlayers(2));
         }
+        let players: Vec<Player> = (0..players_num)
+            .map(|_| Player::new(id_producer.next_id()))
+            .collect();
         let player_ids: HashSet<ID> = players.iter().map(|p| p.id()).collect();
-        if players.len() != player_ids.len() {
-            return Err(GameEngineBuilderInitiationError::DuplicatePlayers);
-        }
         Ok(GameEngineBuilder {
             map,
             players,
@@ -53,7 +53,7 @@ impl GameEngineBuilder {
     pub fn rectangle(
         width: u32,
         height: u32,
-        players: Vec<Player>,
+        players_num: u8,
     ) -> Result<Self, GameEngineBuilderInitiationError> {
         if width < 5 || height < 5 {
             return Err(GameEngineBuilderInitiationError::TooSmallMap);
@@ -72,13 +72,10 @@ impl GameEngineBuilder {
             };
             start = start + direction;
         }
-        Self::new(map, players, id_producer)
+        Self::new(map, players_num, id_producer)
     }
 
-    pub fn circle(
-        radius: u32,
-        players: Vec<Player>,
-    ) -> Result<Self, GameEngineBuilderInitiationError> {
+    pub fn circle(radius: u32, players_num: u8) -> Result<Self, GameEngineBuilderInitiationError> {
         if radius < 3 {
             return Err(GameEngineBuilderInitiationError::TooSmallMap);
         }
@@ -88,11 +85,15 @@ impl GameEngineBuilder {
         start.for_each_in_range(radius as i32, |c| {
             map.insert(c, Tile::new(id_producer.next_id(), TileSurface::Water));
         });
-        Self::new(map, players, id_producer)
+        Self::new(map, players_num, id_producer)
     }
 
     pub fn map(&self) -> &HashMap<Coord, Tile> {
         &self.map
+    }
+
+    pub fn players(&self) -> &Vec<Player> {
+        &self.players
     }
 
     pub fn owners(&self) -> &HashMap<Coord, ID> {
@@ -111,6 +112,7 @@ impl GameEngineBuilder {
         if surface == TileSurface::Water && tile.unit().is_some() {
             tile.take_unit();
         }
+        self.coodinate_to_owner.remove(&coordinate);
         tile.set_surface(surface);
 
         Ok(())
@@ -127,6 +129,10 @@ impl GameEngineBuilder {
             ));
         } else if !self.player_ids.contains(&owner_id) {
             return Err(GameEngineBuilderModificationError::NoSuchPlayer(owner_id));
+        } else if !self.map[&coordinate].surface().is_land() {
+            return Err(GameEngineBuilderModificationError::CoordinateCannotBeOwned(
+                coordinate,
+            ));
         }
         self.coodinate_to_owner.insert(coordinate, owner_id);
 
@@ -145,7 +151,8 @@ impl GameEngineBuilder {
                 .iter()
                 .filter(|n| {
                     coordinate_to_region.contains_key(n) && coordinate_to_owner.contains_key(n)
-                }).filter(|n| coordinate_to_owner[&n] == owner_id)
+                })
+                .filter(|n| coordinate_to_owner[&n] == owner_id)
                 .cloned()
                 .collect();
             if same_owners.is_empty() {
@@ -212,7 +219,8 @@ impl GameEngineBuilder {
                 .place_unit(
                     Unit::new(id_producer.next_id(), UnitType::Village),
                     coordinate,
-                ).unwrap();
+                )
+                .unwrap();
         }
     }
 
@@ -228,49 +236,42 @@ impl GameEngineBuilder {
 
 #[cfg(test)]
 mod test {
-    use super::{GameEngineBuilder, GameEngineBuilderInitiationError};
-    use crate::game::{Coord, Player, TileSurface};
+    use super::{
+        GameEngineBuilder, GameEngineBuilderInitiationError, GameEngineBuilderModificationError,
+    };
+    use crate::game::{Coord, TileSurface};
 
     #[test]
     fn check_circle_creation_size_error() {
-        let result = GameEngineBuilder::circle(1, vec![Player::new(1), Player::new(2)]);
+        let result = GameEngineBuilder::circle(1, 2);
 
         assert_eq!(result, Err(GameEngineBuilderInitiationError::TooSmallMap));
     }
 
     #[test]
-    fn check_circle_creation_players_error() {
-        let result = GameEngineBuilder::circle(3, vec![Player::new(1), Player::new(1)]);
-
-        assert_eq!(
-            result,
-            Err(GameEngineBuilderInitiationError::DuplicatePlayers)
-        );
-    }
-
-    #[test]
     fn check_circle_creation_ok() {
-        let result = GameEngineBuilder::circle(3, vec![Player::new(1), Player::new(2)]);
+        let result = GameEngineBuilder::circle(3, 2);
         assert!(result.is_ok());
     }
 
     #[test]
     fn check_rectangle_creation_size_error() {
-        let result = GameEngineBuilder::rectangle(1, 10, vec![Player::new(1), Player::new(2)]);
+        let result = GameEngineBuilder::rectangle(1, 10, 2);
 
         assert_eq!(result, Err(GameEngineBuilderInitiationError::TooSmallMap));
     }
 
     #[test]
     fn check_rectangle_creation_ok() {
-        let result = GameEngineBuilder::rectangle(15, 10, vec![Player::new(1), Player::new(2)]);
+        let result = GameEngineBuilder::rectangle(15, 10, 2);
         assert!(result.is_ok());
     }
 
     #[test]
     fn check_circle_build_ok() {
-        let mut builder =
-            GameEngineBuilder::circle(3, vec![Player::new(1), Player::new(2)]).unwrap();
+        let mut builder = GameEngineBuilder::circle(3, 2).unwrap();
+        let one_id = builder.players()[0].id();
+        let two_id = builder.players()[1].id();
 
         let start_coord = Coord::new(0, 0);
         start_coord.for_each_in_range(3, |c| {
@@ -279,13 +280,55 @@ mod test {
             }
             builder.set_surface(c, TileSurface::Land).unwrap();
             if c.y > 0 {
-                builder.set_owner(c, 1).unwrap();
+                builder.set_owner(c, one_id).unwrap();
             } else {
-                builder.set_owner(c, 2).unwrap();
+                builder.set_owner(c, two_id).unwrap();
             }
         });
 
         let result = builder.build();
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn check_cannot_set_owner_for_water_tile() {
+        let mut builder = GameEngineBuilder::circle(4, 2).unwrap();
+        let player_id = builder.players()[0].id();
+        let coord = Coord::new(0, 0);
+
+        assert_eq!(
+            builder.set_owner(coord, player_id),
+            Err(GameEngineBuilderModificationError::CoordinateCannotBeOwned(
+                coord
+            ))
+        );
+
+        assert_eq!(builder.owners().get(&coord), None);
+    }
+
+    #[test]
+    fn check_can_set_owner_for_land_tile() {
+        let mut builder = GameEngineBuilder::circle(4, 2).unwrap();
+        let player_id = builder.players()[0].id();
+        let coord = Coord::new(0, 0);
+
+        assert_eq!(builder.set_surface(coord, TileSurface::Land), Ok(()));
+        assert_eq!(builder.set_owner(coord, player_id), Ok(()));
+
+        assert_eq!(builder.owners().get(&coord), Some(&player_id));
+    }
+
+    #[test]
+    fn check_removal_of_land_removes_ownership() {
+        let mut builder = GameEngineBuilder::circle(4, 2).unwrap();
+        let player_id = builder.players()[0].id();
+        let coord = Coord::new(0, 0);
+
+        assert_eq!(builder.set_surface(coord, TileSurface::Land), Ok(()));
+        assert_eq!(builder.set_owner(coord, player_id), Ok(()));
+        assert_eq!(builder.owners().get(&coord), Some(&player_id));
+
+        assert_eq!(builder.set_surface(coord, TileSurface::Water), Ok(()));
+        assert_eq!(builder.owners().get(&coord), None);
     }
 }
